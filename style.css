@@ -1,0 +1,112 @@
+/* Light mode tokens (default) */
+#reddit-hover-popup {
+  --rh-bg:           #ffffff;
+  --rh-bg-scroll:    #f6f7f8;
+  --rh-border:       #edeff1;
+  --rh-text:         #1c1c1c;
+  --rh-meta:         #878a8c;
+  --rh-shadow:       rgba(0, 0, 0, 0.20);
+  --rh-scrollbar:    #c8cbcf;
+}
+
+/* Dark mode tokens — mirrors Reddit's dark theme palette */
+@media (prefers-color-scheme: dark) {
+  #reddit-hover-popup {
+    --rh-bg:        #1a1a1b;
+    --rh-bg-scroll: #272729;
+    --rh-border:    #343536;
+    --rh-text:      #d7dadc;
+    --rh-meta:      #818384;
+    --rh-shadow:    rgba(0, 0, 0, 0.55);
+    --rh-scrollbar: #3c3c3e;
+  }
+}
+
+#reddit-hover-popup {
+  position: fixed;
+  right: 20px;
+  top: 120px;
+  width: min(420px, calc(100vw - 30px));
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--rh-bg);
+  border: 1px solid var(--rh-border);
+  padding: 15px;
+  z-index: 2147483647;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--rh-text);
+  box-shadow: 0 14px 34px var(--rh-shadow);
+  color-scheme: light dark;
+}
+
+/* Scrollbar styling */
+#reddit-hover-popup::-webkit-scrollbar {
+  width: 6px;
+}
+#reddit-hover-popup::-webkit-scrollbar-track {
+  background: transparent;
+}
+#reddit-hover-popup::-webkit-scrollbar-thumb {
+  background: var(--rh-scrollbar);
+  border-radius: 4px;
+}
+
+#reddit-hover-popup.hidden {
+  display: none;
+}
+
+#reddit-hover-popup .rh-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+#reddit-hover-popup .rh-meta {
+  margin: 0 0 10px;
+  color: var(--rh-meta);
+  font-size: 12px;
+}
+
+#reddit-hover-popup .rh-body {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--rh-border);
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+
+#reddit-hover-popup .rh-comment-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rh-border);
+}
+
+#reddit-hover-popup .rh-comment-section.hidden {
+  display: none;
+}
+
+#reddit-hover-popup .rh-comment-label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--rh-meta);
+}
+
+#reddit-hover-popup .rh-comment-author {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--rh-meta);
+}
+
+#reddit-hover-popup .rh-comment-body {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+}
