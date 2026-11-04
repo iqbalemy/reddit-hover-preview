@@ -16,13 +16,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return;
       }
 
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.includes("json")) {
+      // Some block/interstitial pages are served with a JSON-ish
+      // content-type header, so sniff the body itself instead of trusting it.
+      const text = await response.text();
+      if (!text.trim().startsWith("[") && !text.trim().startsWith("{")) {
         sendResponse({ ok: false, error: "Reddit returned a non-JSON (blocked?) response" });
         return;
       }
 
-      const payload = await response.json();
+      const payload = JSON.parse(text);
       sendResponse({ ok: true, payload });
     })
     .catch((error) => {
