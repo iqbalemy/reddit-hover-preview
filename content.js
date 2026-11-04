@@ -42,8 +42,8 @@ function onMouseOver(event) {
     return;
   }
 
-  const link = event.target.closest("a[href*='/comments/']");
-  if (!isValidPostLink(link)) {
+  const postUrl = resolvePostUrl(event.target);
+  if (!postUrl) {
     return;
   }
 
@@ -51,8 +51,36 @@ function onMouseOver(event) {
   clearTimeout(hoverTimer);
 
   hoverTimer = setTimeout(() => {
-    void loadPreview(link.href);
+    void loadPreview(postUrl);
   }, HOVER_DELAY_MS);
+}
+
+// Resolves the Reddit post URL for the hovered element.
+// Old Reddit (and plain title links) use a real <a href="/comments/...">.
+// New Reddit's card/compact feed rows are <shreddit-post> web components:
+// hovering the card background retargets event.target to the <shreddit-post>
+// host itself (shadow DOM retargeting), so we fall back to its
+// "permalink"/"content-href" attribute to cover that layout too.
+function resolvePostUrl(target) {
+  const link = target.closest?.("a[href*='/comments/']");
+  if (isValidPostLink(link)) {
+    return link.href;
+  }
+
+  const post = target.closest?.("shreddit-post");
+  if (post) {
+    const permalink =
+      post.getAttribute("permalink") || post.getAttribute("content-href");
+    if (permalink) {
+      try {
+        return new URL(permalink, window.location.origin).href;
+      } catch {
+        return "";
+      }
+    }
+  }
+
+  return "";
 }
 
 function onMouseOut(event) {
