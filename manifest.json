@@ -4,6 +4,14 @@
   "version": "1.0",
   "description": "Preview Reddit posts by hovering",
   "permissions": ["storage"],
+  "host_permissions": [
+    "https://www.reddit.com/*",
+    "https://old.reddit.com/*",
+    "https://reddit.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": [

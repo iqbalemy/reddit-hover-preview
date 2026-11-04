@@ -168,12 +168,15 @@ async function loadPreview(postUrl) {
 
   try {
     const jsonUrl = buildJsonUrl(normalizedUrl);
-    const response = await fetch(jsonUrl, { credentials: "omit" });
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+    const result = await chrome.runtime.sendMessage({
+      type: "FETCH_PREVIEW_JSON",
+      url: jsonUrl
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || "Request failed");
     }
 
-    const payload = await response.json();
+    const payload = result.payload;
     const postData = payload?.[0]?.data?.children?.[0]?.data;
     if (!postData) {
       throw new Error("Post data missing in response");
