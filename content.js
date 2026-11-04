@@ -275,5 +275,9 @@ function normalizePostUrl(rawUrl) {
 }
 
 function buildJsonUrl(normalizedUrl) {
-  return `${normalizedUrl}.json?raw_json=1`;
+  // www.reddit.com/*.json increasingly 403s unauthenticated fetches;
+  // old.reddit.com's JSON API stays publicly accessible, so route through it.
+  const url = new URL(normalizedUrl);
+  url.hostname = "old.reddit.com";
+  return `${url.href}.json?raw_json=1`;
 }
