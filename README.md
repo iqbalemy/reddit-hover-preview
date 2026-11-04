@@ -1,11 +1,12 @@
 # Reddit Hover Preview
 
-Hover over a Reddit post to see the full content without opening it.
+A lightweight Chrome/Edge extension that lets you preview Reddit posts on hover — see the title, text, and top comment without clicking through, in both card and compact feed view.
 
 Features:
-- Hover preview
-- Fast loading
-- Lightweight
+- Instant Reddit post preview on hover
+- Works in card view and compact view
+- Shows title, subreddit/author, self-text, and top comment
+- Fast, lightweight, no tracking
 
 ## What It Does
 
