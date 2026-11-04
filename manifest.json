@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reddit Hover Preview",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Hover over any Reddit post to instantly preview its title, text, and top comment — no clicking. Works in card and compact view.",
   "permissions": ["storage"],
   "host_permissions": [
