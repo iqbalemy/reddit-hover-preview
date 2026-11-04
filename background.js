@@ -6,12 +6,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
-  fetch(message.url, { credentials: "omit" })
+  // Reddit now rejects most cookie-less JSON requests with 403 or a block
+  // page. "include" attaches the user's existing reddit.com session cookie
+  // (same site the user is already signed into) instead of a third party.
+  fetch(message.url, { credentials: "include" })
     .then(async (response) => {
       if (!response.ok) {
         sendResponse({ ok: false, error: `Request failed: ${response.status}` });
         return;
       }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.includes("json")) {
+        sendResponse({ ok: false, error: "Reddit returned a non-JSON (blocked?) response" });
+        return;
+      }
+
       const payload = await response.json();
       sendResponse({ ok: true, payload });
     })
