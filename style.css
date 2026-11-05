@@ -27,7 +27,11 @@
   right: 20px;
   top: 120px;
   width: min(420px, calc(100vw - 30px));
-  max-height: 70vh;
+  /* Fill down to near the bottom of the actual browser viewport instead of
+     a flat vh fraction, which either wastes space on tall windows or — on
+     short ones — can push past the bottom edge with no way to reach it,
+     since a fixed element doesn't scroll with the page. */
+  max-height: calc(100vh - 120px - 20px);
   overflow-y: auto;
   background: var(--rh-bg);
   border: 1px solid var(--rh-border);

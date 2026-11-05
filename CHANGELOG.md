@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.6] - 2026-11-05
+
+### Changed
+- Popup height now fills down to near the bottom of the actual browser viewport (`calc(100vh - 120px - 20px)`) instead of a flat `70vh`, which either wasted space on tall windows or, on short ones, could push the popup past the bottom edge with no way to scroll to it (fixed elements don't scroll with the page).
+
 ## [1.5] - 2026-11-05
 
 ### Fixed
