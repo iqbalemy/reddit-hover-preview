@@ -342,7 +342,17 @@ async function loadFullContent(postUrl) {
 
     const fullData = {
       postUrl,
-      body: postData.selftext?.trim() || "",
+      // Authoritative title/meta/stats from the fetch itself — used to
+      // correct the quick DOM-scraped placeholder once this resolves,
+      // since that scrape can come up empty if Reddit's feed markup
+      // doesn't match the selectors/attributes we guessed.
+      title: postData.title || "",
+      meta: `r/${postData.subreddit || "unknown"} by u/${postData.author || "unknown"}`,
+      score: typeof postData.score === "number" ? String(postData.score) : "",
+      commentCount: typeof postData.num_comments === "number" ? String(postData.num_comments) : "",
+      body:
+        postData.selftext?.trim() ||
+        (postData.is_self ? "" : "(Link post: no text preview available.)"),
       images: extractImages(postData),
       topCommentAuthor: topCommentData ? `u/${topCommentData.author}` : "",
       topCommentBody: topCommentData?.body?.trim() || "",
@@ -434,6 +444,17 @@ function renderFullContent(fullData) {
   }
 
   popup.querySelector(".rh-loading").classList.add("hidden");
+
+  // Correct the quick DOM-scraped placeholder with the real data, in case
+  // that scrape came up empty (e.g. "Untitled post" / "r/unknown").
+  if (fullData.title) {
+    popup.querySelector(".rh-title").textContent = fullData.title;
+  }
+  popup.querySelector(".rh-meta").textContent = fullData.meta;
+  popup.querySelector(".rh-stats").textContent = [
+    fullData.score ? `${fullData.score} upvotes` : "",
+    fullData.commentCount ? `${fullData.commentCount} comments` : ""
+  ].filter(Boolean).join(" · ");
 
   const bodyEl = popup.querySelector(".rh-body");
   if (fullData.body) {
