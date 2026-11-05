@@ -81,6 +81,13 @@
   font-weight: 600;
 }
 
+#reddit-hover-popup .rh-loading {
+  margin: 0 0 10px;
+  color: var(--rh-meta);
+  font-size: 12px;
+  font-style: italic;
+}
+
 #reddit-hover-popup .rh-media {
   position: relative;
   margin-bottom: 10px;

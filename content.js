@@ -1,8 +1,8 @@
 const SETTINGS_KEY = "hoverPreviewEnabled";
 const HOVER_DELAY_MS = 450;
 const HIDE_DELAY_MS = 140;
-// Only content fetched after an explicit click is cached here. Hovering
-// never populates this cache, because hovering never fetches anything.
+// Post text/comment/image-URL data, fetched once per post on hover and
+// cached here so re-hovering (or re-revealing media) doesn't re-fetch.
 const fullContentCache = new Map();
 
 let enabled = true;
@@ -66,9 +66,9 @@ function onMouseOver(event) {
 // retargeting), so we fall back to its "permalink"/"content-href" attribute
 // to cover that layout too, and scrape the rest straight off the element.
 //
-// Deliberately read-only and synchronous: nothing here ever fetches the
-// post. Hovering must never register as a view/interaction against the
-// post owner's insights — only an explicit click on "Show content" does.
+// Deliberately read-only and synchronous: used only for the instant
+// quick-preview shown before the real fetch (see showQuickPreview/
+// loadFullContent) resolves.
 function resolvePostContext(target) {
   const link = target.closest?.("a[href*='/comments/']");
   if (isValidPostLink(link)) {
@@ -176,6 +176,7 @@ function setupPopupElement() {
     <h4 class="rh-title"></h4>
     <p class="rh-meta"></p>
     <p class="rh-stats"></p>
+    <p class="rh-loading hidden">Loading post…</p>
     <div class="rh-media">
       <img class="rh-thumb hidden" alt="" />
       <button type="button" class="rh-show-content-btn hidden">Show content</button>
@@ -205,12 +206,19 @@ function setupPopupElement() {
     }, HIDE_DELAY_MS);
   });
 
-  // The ONLY thing in this extension that fetches the post: an explicit
-  // click. This is what actually registers as a real request against
-  // Reddit's own servers (i.e. what feeds the owner's view/interaction
-  // counters) — hovering never does this.
+  // Image data was already fetched (and its bytes already prefetched)
+  // during hover — this click only reveals the carousel, it makes no
+  // network request of its own.
   popup.querySelector(".rh-show-content-btn").addEventListener("click", () => {
-    void loadFullContent(popup.dataset.postUrl);
+    const postUrl = popup.dataset.postUrl;
+    const fullData = fullContentCache.get(postUrl);
+    if (!fullData) {
+      return;
+    }
+
+    fullData.mediaRevealed = true;
+    fullContentCache.set(postUrl, fullData);
+    renderMedia(popup, fullData);
   });
 
   document.body.appendChild(popup);
@@ -236,7 +244,12 @@ function hidePopup(forceHide) {
 }
 
 // Hover handler: renders instantly from data the feed page already has in
-// the DOM. No network request is made here, by design.
+// the DOM, then kicks off the one network fetch that fills in the post's
+// text body and top comment (always shown — no click needed for those).
+// Image media is the only thing still gated behind "Show content": we
+// fetch its URLs up front here too (same request) and start prefetching
+// the image bytes immediately, so revealing the carousel on click is
+// instant instead of waiting on a fresh image download.
 function showQuickPreview(context) {
   const normalizedUrl = normalizePostUrl(context.url);
   if (!normalizedUrl) {
@@ -254,11 +267,11 @@ function showQuickPreview(context) {
 
   renderQuickPopup(normalizedUrl, quickData);
 
-  // If this post's content was already loaded by an earlier click, show it
-  // again straight from the cache instead of re-fetching.
   const cachedFull = fullContentCache.get(normalizedUrl);
   if (cachedFull) {
     renderFullContent(cachedFull);
+  } else {
+    void loadFullContent(normalizedUrl);
   }
 }
 
@@ -286,31 +299,26 @@ function renderQuickPopup(postUrl, quickData) {
   }
 
   popup.querySelector(".rh-carousel").classList.add("hidden");
+  popup.querySelector(".rh-show-content-btn").classList.add("hidden");
   popup.querySelector(".rh-body").classList.add("hidden");
   popup.querySelector(".rh-comment-section").classList.add("hidden");
-
-  const showBtn = popup.querySelector(".rh-show-content-btn");
-  showBtn.disabled = false;
-  showBtn.textContent = "Show content";
-  showBtn.classList.remove("hidden");
+  popup.querySelector(".rh-loading").classList.remove("hidden");
 
   popup.classList.remove("hidden");
   popup.scrollTop = 0;
 }
 
-// Click handler: this is the one place in the extension that talks to
-// Reddit's post JSON endpoint, and only fires on an explicit user click.
+// Fetches the post's text body, top comment, and image URLs. Runs
+// automatically on hover (text/comment are always shown), since that's
+// the one network request the whole preview needs — image *bytes* are
+// prefetched here too, in the background, so the only thing left for the
+// "Show content" click to do is reveal an already-loaded carousel.
 async function loadFullContent(postUrl) {
   if (!postUrl) {
     return;
   }
 
   const popup = getPopupElement();
-  const showBtn = popup?.querySelector(".rh-show-content-btn");
-  if (showBtn) {
-    showBtn.disabled = true;
-    showBtn.textContent = "Loading…";
-  }
 
   try {
     const jsonUrl = buildJsonUrl(postUrl);
@@ -338,7 +346,8 @@ async function loadFullContent(postUrl) {
       images: extractImages(postData),
       topCommentAuthor: topCommentData ? `u/${topCommentData.author}` : "",
       topCommentBody: topCommentData?.body?.trim() || "",
-      topCommentUps: topCommentData && typeof topCommentData.ups === "number" ? topCommentData.ups : null
+      topCommentUps: topCommentData && typeof topCommentData.ups === "number" ? topCommentData.ups : null,
+      mediaRevealed: false
     };
 
     if (fullContentCache.size > 60) {
@@ -346,17 +355,47 @@ async function loadFullContent(postUrl) {
       fullContentCache.delete(oldestKey);
     }
     fullContentCache.set(postUrl, fullData);
+    prefetchImages(fullData.images);
 
     if (popup?.dataset.postUrl === postUrl) {
       renderFullContent(fullData);
     }
   } catch (error) {
-    if (popup?.dataset.postUrl === postUrl && showBtn) {
-      showBtn.disabled = false;
-      showBtn.textContent = "Couldn't load — retry";
+    if (popup?.dataset.postUrl === postUrl) {
+      popup.querySelector(".rh-loading").classList.add("hidden");
+      const bodyEl = popup.querySelector(".rh-body");
+      bodyEl.textContent = "Could not load this post right now.";
+      bodyEl.classList.remove("hidden");
     }
     console.error("[Reddit Hover Preview]", error);
   }
+}
+
+// Warms the browser's own image cache while the user is still just
+// hovering, so clicking "Show content" later displays instantly instead
+// of waiting on a fresh download. The first image is prefetched at high
+// priority since it's what the carousel opens on; the rest follow at low
+// priority so they don't compete with it for bandwidth.
+function prefetchImages(urls) {
+  if (!urls.length) {
+    return;
+  }
+
+  prefetchImage(urls[0], "high");
+  if (urls.length > 1) {
+    setTimeout(() => {
+      urls.slice(1).forEach((url) => prefetchImage(url, "low"));
+    }, 0);
+  }
+}
+
+function prefetchImage(url, priority) {
+  const img = new Image();
+  img.decoding = "async";
+  if ("fetchPriority" in img) {
+    img.fetchPriority = priority;
+  }
+  img.src = url;
 }
 
 // Extracts every image for the post: the full gallery when it's a gallery
@@ -386,22 +425,15 @@ function extractImages(postData) {
   return [];
 }
 
+// Text and top comment are always shown once loaded — only the image
+// media stays gated behind the "Show content" click (see renderMedia).
 function renderFullContent(fullData) {
   const popup = getPopupElement();
   if (!popup || popup.dataset.postUrl !== fullData.postUrl) {
     return;
   }
 
-  popup.querySelector(".rh-thumb").classList.add("hidden");
-  popup.querySelector(".rh-show-content-btn").classList.add("hidden");
-
-  const carousel = popup.querySelector(".rh-carousel");
-  if (fullData.images.length) {
-    setupCarousel(carousel, fullData.images);
-    carousel.classList.remove("hidden");
-  } else {
-    carousel.classList.add("hidden");
-  }
+  popup.querySelector(".rh-loading").classList.add("hidden");
 
   const bodyEl = popup.querySelector(".rh-body");
   if (fullData.body) {
@@ -420,6 +452,39 @@ function renderFullContent(fullData) {
     commentSection.classList.remove("hidden");
   } else {
     commentSection.classList.add("hidden");
+  }
+
+  renderMedia(popup, fullData);
+}
+
+// Shows the "Show content" button over whatever thumbnail is already
+// displayed until the user clicks it, then swaps to the full carousel —
+// using the already-prefetched images, so the swap is instant.
+function renderMedia(popup, fullData) {
+  const thumbEl = popup.querySelector(".rh-thumb");
+  const showBtn = popup.querySelector(".rh-show-content-btn");
+  const carousel = popup.querySelector(".rh-carousel");
+
+  if (!fullData.images.length) {
+    showBtn.classList.add("hidden");
+    carousel.classList.add("hidden");
+    return;
+  }
+
+  if (fullData.mediaRevealed) {
+    thumbEl.classList.add("hidden");
+    showBtn.classList.add("hidden");
+    setupCarousel(carousel, fullData.images);
+    carousel.classList.remove("hidden");
+    return;
+  }
+
+  carousel.classList.add("hidden");
+  showBtn.classList.remove("hidden");
+
+  if (thumbEl.classList.contains("hidden")) {
+    thumbEl.src = fullData.images[0];
+    thumbEl.classList.remove("hidden");
   }
 }
 

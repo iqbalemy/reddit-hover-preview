@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.3] - 2026-11-05
+
+### Changed
+- **"Show content" now only gates image media.** The post's full text body and top comment (with its upvote count) load automatically a moment after hovering and are always shown — they no longer require a click.
+- Image URLs are fetched at the same time as the text/comment (one request, on hover), but the image *bytes* are prefetched in the background (first image at high priority, the rest at low priority) while the user is still just hovering. Clicking "Show content" now only reveals the already-loaded carousel — no network wait on click.
+- Note: this reintroduces an automatic fetch on hover (to get the text/comment), the same request the earlier "hover never fetches" design in 1.2 was built to avoid. That trade-off was requested explicitly — text/comment are now always-on, and only the image reveal stays gated behind an explicit click.
+
 ## [1.2] - 2026-11-05
 
 ### Added
