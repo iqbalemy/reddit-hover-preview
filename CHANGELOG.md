@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.2] - 2026-11-05
+
+### Added
+- Image carousel: posts with multiple images (galleries) can now be browsed image-by-image inside the preview, with prev/next controls and position dots.
+- Top comment now shows its upvote count alongside the author and body.
+- Quick stats (post score and comment count) now show in the preview immediately on hover, read straight from the feed page.
+
+### Changed
+- **Hovering a post no longer fetches anything.** The preview now renders instantly from data the feed page already has in the DOM (title, subreddit/author, score, comment count, and a thumbnail if one is already rendered). This avoids hovering being indistinguishable from a real pageview against the post owner's view/interaction counters.
+- A new **"Show content"** button loads the rest (full self-text body, full image gallery, top comment with its upvotes) only when clicked. Clicking is an explicit, deliberate action — the same as opening the post — so it is the only thing in the extension that still fetches the post.
+- Previously loaded content for a post is cached and reused on repeat hovers, so clicking "Show content" again for the same post doesn't re-fetch.
+
 ## [1.1] - 2026-11-04
 
 ### Fixed

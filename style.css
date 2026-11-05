@@ -57,6 +57,10 @@
   display: none;
 }
 
+#reddit-hover-popup .hidden {
+  display: none !important;
+}
+
 #reddit-hover-popup .rh-title {
   margin: 0 0 8px;
   font-size: 15px;
@@ -65,9 +69,120 @@
 }
 
 #reddit-hover-popup .rh-meta {
+  margin: 0 0 4px;
+  color: var(--rh-meta);
+  font-size: 12px;
+}
+
+#reddit-hover-popup .rh-stats {
   margin: 0 0 10px;
   color: var(--rh-meta);
   font-size: 12px;
+  font-weight: 600;
+}
+
+#reddit-hover-popup .rh-media {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+#reddit-hover-popup .rh-thumb {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+#reddit-hover-popup .rh-show-content-btn {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.65);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+/* No thumbnail to overlay on — show it as a plain inline button instead. */
+#reddit-hover-popup .rh-media:not(:has(.rh-thumb:not(.hidden))) .rh-show-content-btn {
+  position: static;
+  display: inline-block;
+  color: var(--rh-text);
+  background: var(--rh-bg-scroll);
+  border: 1px solid var(--rh-border);
+}
+
+#reddit-hover-popup .rh-show-content-btn:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+#reddit-hover-popup .rh-carousel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--rh-bg-scroll);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+#reddit-hover-popup .rh-carousel-img {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+}
+
+#reddit-hover-popup .rh-carousel-prev,
+#reddit-hover-popup .rh-carousel-next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  line-height: 26px;
+  text-align: center;
+  font-size: 16px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+#reddit-hover-popup .rh-carousel-prev {
+  left: 6px;
+}
+
+#reddit-hover-popup .rh-carousel-next {
+  right: 6px;
+}
+
+#reddit-hover-popup .rh-carousel-dots {
+  position: absolute;
+  bottom: 6px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+}
+
+#reddit-hover-popup .rh-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+#reddit-hover-popup .rh-dot.active {
+  background: #fff;
 }
 
 #reddit-hover-popup .rh-body {
@@ -82,10 +197,6 @@
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--rh-border);
-}
-
-#reddit-hover-popup .rh-comment-section.hidden {
-  display: none;
 }
 
 #reddit-hover-popup .rh-comment-label {

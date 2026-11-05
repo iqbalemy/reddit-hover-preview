@@ -1,7 +1,9 @@
 const SETTINGS_KEY = "hoverPreviewEnabled";
 const HOVER_DELAY_MS = 450;
 const HIDE_DELAY_MS = 140;
-const previewCache = new Map();
+// Only content fetched after an explicit click is cached here. Hovering
+// never populates this cache, because hovering never fetches anything.
+const fullContentCache = new Map();
 
 let enabled = true;
 let hoverTimer = null;
@@ -42,8 +44,8 @@ function onMouseOver(event) {
     return;
   }
 
-  const postUrl = resolvePostUrl(event.target);
-  if (!postUrl) {
+  const context = resolvePostContext(event.target);
+  if (!context) {
     return;
   }
 
@@ -51,20 +53,26 @@ function onMouseOver(event) {
   clearTimeout(hoverTimer);
 
   hoverTimer = setTimeout(() => {
-    void loadPreview(postUrl);
+    showQuickPreview(context);
   }, HOVER_DELAY_MS);
 }
 
-// Resolves the Reddit post URL for the hovered element.
-// Old Reddit (and plain title links) use a real <a href="/comments/...">.
-// New Reddit's card/compact feed rows are <shreddit-post> web components:
-// hovering the card background retargets event.target to the <shreddit-post>
-// host itself (shadow DOM retargeting), so we fall back to its
-// "permalink"/"content-href" attribute to cover that layout too.
-function resolvePostUrl(target) {
+// Resolves the Reddit post URL *and* the DOM node that already holds that
+// post's feed-row data for the hovered element. Old Reddit (and plain title
+// links) use a real <a href="/comments/...">, with the rest of the row's
+// data living on the ancestor ".thing". New Reddit's card/compact feed rows
+// are <shreddit-post> web components: hovering the card background
+// retargets event.target to the <shreddit-post> host itself (shadow DOM
+// retargeting), so we fall back to its "permalink"/"content-href" attribute
+// to cover that layout too, and scrape the rest straight off the element.
+//
+// Deliberately read-only and synchronous: nothing here ever fetches the
+// post. Hovering must never register as a view/interaction against the
+// post owner's insights — only an explicit click on "Show content" does.
+function resolvePostContext(target) {
   const link = target.closest?.("a[href*='/comments/']");
   if (isValidPostLink(link)) {
-    return link.href;
+    return { url: link.href, kind: "old", el: link.closest?.(".thing") || link };
   }
 
   const post = target.closest?.("shreddit-post");
@@ -73,14 +81,73 @@ function resolvePostUrl(target) {
       post.getAttribute("permalink") || post.getAttribute("content-href");
     if (permalink) {
       try {
-        return new URL(permalink, window.location.origin).href;
+        return { url: new URL(permalink, window.location.origin).href, kind: "new", el: post };
       } catch {
-        return "";
+        return null;
       }
     }
   }
 
-  return "";
+  return null;
+}
+
+// Best-effort scrape of whatever the new-Reddit feed already rendered for
+// this post. Attribute names on <shreddit-post> aren't publicly documented
+// and can change; every lookup here is defensive so a missing/renamed
+// attribute just degrades to a blanker quick-preview instead of throwing.
+function extractQuickDataNewReddit(post) {
+  const title = post.getAttribute("post-title") || "Untitled post";
+  const subredditName = post.getAttribute("subreddit-prefixed-name") ||
+    (post.getAttribute("subreddit-name") ? `r/${post.getAttribute("subreddit-name")}` : "r/unknown");
+  const author = post.getAttribute("author") || "unknown";
+  const score = post.getAttribute("score");
+  const commentCount = post.getAttribute("comment-count");
+
+  let thumbnailUrl = "";
+  try {
+    const img = post.querySelector(
+      '[slot="thumbnail"] img, [slot="thumbnail"] faceplate-img, img'
+    );
+    thumbnailUrl = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
+  } catch {
+    thumbnailUrl = "";
+  }
+
+  return {
+    title,
+    meta: `${subredditName} by u/${author}`,
+    score,
+    commentCount,
+    thumbnailUrl
+  };
+}
+
+function extractQuickDataOldReddit(el) {
+  const thing = el.closest?.(".thing") || el;
+  const title = thing.querySelector?.("a.title")?.textContent?.trim() || "Untitled post";
+  const author = thing.querySelector?.(".tagline a.author")?.textContent?.trim() || "unknown";
+  const subreddit = thing.querySelector?.(".tagline a.subreddit")?.textContent?.trim() || "r/unknown";
+  const scoreEl = thing.querySelector?.(".score.unvoted");
+  const score = scoreEl?.getAttribute("title") || scoreEl?.textContent?.trim() || "";
+  const commentCount = thing.querySelector?.("a.comments")?.textContent?.trim() || "";
+  const thumbnailSrc = thing.querySelector?.("a.thumbnail img")?.getAttribute("src") || "";
+
+  let thumbnailUrl = "";
+  if (thumbnailSrc) {
+    try {
+      thumbnailUrl = new URL(thumbnailSrc, window.location.origin).href;
+    } catch {
+      thumbnailUrl = "";
+    }
+  }
+
+  return {
+    title,
+    meta: `${subreddit} by u/${author}`,
+    score,
+    commentCount,
+    thumbnailUrl
+  };
 }
 
 function onMouseOut(event) {
@@ -108,10 +175,22 @@ function setupPopupElement() {
   popup.innerHTML = `
     <h4 class="rh-title"></h4>
     <p class="rh-meta"></p>
-    <pre class="rh-body"></pre>
-    <div class="rh-comment-section">
+    <p class="rh-stats"></p>
+    <div class="rh-media">
+      <img class="rh-thumb hidden" alt="" />
+      <button type="button" class="rh-show-content-btn hidden">Show content</button>
+      <div class="rh-carousel hidden">
+        <button type="button" class="rh-carousel-prev hidden" aria-label="Previous image">&#8249;</button>
+        <img class="rh-carousel-img" alt="" />
+        <button type="button" class="rh-carousel-next hidden" aria-label="Next image">&#8250;</button>
+        <div class="rh-carousel-dots"></div>
+      </div>
+    </div>
+    <pre class="rh-body hidden"></pre>
+    <div class="rh-comment-section hidden">
       <p class="rh-comment-label">Top comment</p>
       <p class="rh-comment-author"></p>
+      <p class="rh-comment-ups"></p>
       <pre class="rh-comment-body"></pre>
     </div>
   `;
@@ -124,6 +203,14 @@ function setupPopupElement() {
     hideTimer = setTimeout(() => {
       hidePopup(false);
     }, HIDE_DELAY_MS);
+  });
+
+  // The ONLY thing in this extension that fetches the post: an explicit
+  // click. This is what actually registers as a real request against
+  // Reddit's own servers (i.e. what feeds the owner's view/interaction
+  // counters) — hovering never does this.
+  popup.querySelector(".rh-show-content-btn").addEventListener("click", () => {
+    void loadFullContent(popup.dataset.postUrl);
   });
 
   document.body.appendChild(popup);
@@ -148,8 +235,10 @@ function hidePopup(forceHide) {
   activePostUrl = "";
 }
 
-async function loadPreview(postUrl) {
-  const normalizedUrl = normalizePostUrl(postUrl);
+// Hover handler: renders instantly from data the feed page already has in
+// the DOM. No network request is made here, by design.
+function showQuickPreview(context) {
+  const normalizedUrl = normalizePostUrl(context.url);
   if (!normalizedUrl) {
     return;
   }
@@ -157,17 +246,74 @@ async function loadPreview(postUrl) {
   if (activePostUrl === normalizedUrl) {
     return;
   }
-
   activePostUrl = normalizedUrl;
 
-  const cached = previewCache.get(normalizedUrl);
-  if (cached) {
-    renderPopup(cached);
+  const quickData = context.kind === "new"
+    ? extractQuickDataNewReddit(context.el)
+    : extractQuickDataOldReddit(context.el);
+
+  renderQuickPopup(normalizedUrl, quickData);
+
+  // If this post's content was already loaded by an earlier click, show it
+  // again straight from the cache instead of re-fetching.
+  const cachedFull = fullContentCache.get(normalizedUrl);
+  if (cachedFull) {
+    renderFullContent(cachedFull);
+  }
+}
+
+function renderQuickPopup(postUrl, quickData) {
+  const popup = getPopupElement();
+  if (!popup) {
     return;
   }
 
+  popup.dataset.postUrl = postUrl;
+
+  popup.querySelector(".rh-title").textContent = quickData.title;
+  popup.querySelector(".rh-meta").textContent = quickData.meta;
+  popup.querySelector(".rh-stats").textContent = [
+    quickData.score ? `${quickData.score} upvotes` : "",
+    quickData.commentCount ? `${quickData.commentCount} comments` : ""
+  ].filter(Boolean).join(" · ");
+
+  const thumbEl = popup.querySelector(".rh-thumb");
+  if (quickData.thumbnailUrl) {
+    thumbEl.src = quickData.thumbnailUrl;
+    thumbEl.classList.remove("hidden");
+  } else {
+    thumbEl.classList.add("hidden");
+  }
+
+  popup.querySelector(".rh-carousel").classList.add("hidden");
+  popup.querySelector(".rh-body").classList.add("hidden");
+  popup.querySelector(".rh-comment-section").classList.add("hidden");
+
+  const showBtn = popup.querySelector(".rh-show-content-btn");
+  showBtn.disabled = false;
+  showBtn.textContent = "Show content";
+  showBtn.classList.remove("hidden");
+
+  popup.classList.remove("hidden");
+  popup.scrollTop = 0;
+}
+
+// Click handler: this is the one place in the extension that talks to
+// Reddit's post JSON endpoint, and only fires on an explicit user click.
+async function loadFullContent(postUrl) {
+  if (!postUrl) {
+    return;
+  }
+
+  const popup = getPopupElement();
+  const showBtn = popup?.querySelector(".rh-show-content-btn");
+  if (showBtn) {
+    showBtn.disabled = true;
+    showBtn.textContent = "Loading…";
+  }
+
   try {
-    const jsonUrl = buildJsonUrl(normalizedUrl);
+    const jsonUrl = buildJsonUrl(postUrl);
     const result = await chrome.runtime.sendMessage({
       type: "FETCH_PREVIEW_JSON",
       url: jsonUrl
@@ -186,70 +332,127 @@ async function loadPreview(postUrl) {
       (c) => c.kind === "t1" && c.data?.body
     )?.data;
 
-    const previewData = {
-      title: postData.title || "Untitled post",
-      meta: `r/${postData.subreddit || "unknown"} by u/${postData.author || "unknown"}`,
-      body:
-        postData.selftext?.trim() ||
-        (postData.is_self ? "(No body text)" : "(Link post: no text preview available.)"),
+    const fullData = {
+      postUrl,
+      body: postData.selftext?.trim() || "",
+      images: extractImages(postData),
       topCommentAuthor: topCommentData ? `u/${topCommentData.author}` : "",
-      topCommentBody: topCommentData?.body?.trim() || ""
+      topCommentBody: topCommentData?.body?.trim() || "",
+      topCommentUps: topCommentData && typeof topCommentData.ups === "number" ? topCommentData.ups : null
     };
 
-    // Keep a small cache to avoid repeated network calls while browsing.
-    if (previewCache.size > 60) {
-      const oldestKey = previewCache.keys().next().value;
-      previewCache.delete(oldestKey);
+    if (fullContentCache.size > 60) {
+      const oldestKey = fullContentCache.keys().next().value;
+      fullContentCache.delete(oldestKey);
     }
-    previewCache.set(normalizedUrl, previewData);
+    fullContentCache.set(postUrl, fullData);
 
-    if (activePostUrl === normalizedUrl) {
-      renderPopup(previewData);
+    if (popup?.dataset.postUrl === postUrl) {
+      renderFullContent(fullData);
     }
   } catch (error) {
-    if (activePostUrl === normalizedUrl) {
-      renderPopup({
-        title: "Preview unavailable",
-        meta: "",
-        body: "Could not load this post preview right now."
-      });
+    if (popup?.dataset.postUrl === postUrl && showBtn) {
+      showBtn.disabled = false;
+      showBtn.textContent = "Couldn't load — retry";
     }
     console.error("[Reddit Hover Preview]", error);
   }
 }
 
-function renderPopup(previewData) {
-  const popup = getPopupElement();
-  if (!popup) {
-    return;
-  }
+// Extracts every image for the post: the full gallery when it's a gallery
+// post, otherwise the single image/link-preview image, if any.
+function extractImages(postData) {
+  const decode = (url) => (typeof url === "string" ? url.replace(/&amp;/g, "&") : "");
 
-  const titleEl = popup.querySelector(".rh-title");
-  const metaEl = popup.querySelector(".rh-meta");
-  const bodyEl = popup.querySelector(".rh-body");
-  const commentSection = popup.querySelector(".rh-comment-section");
-  const commentAuthorEl = popup.querySelector(".rh-comment-author");
-  const commentBodyEl = popup.querySelector(".rh-comment-body");
-  if (!titleEl || !metaEl || !bodyEl) {
-    return;
-  }
-
-  titleEl.textContent = previewData.title;
-  metaEl.textContent = previewData.meta;
-  bodyEl.textContent = previewData.body;
-
-  if (commentSection && commentAuthorEl && commentBodyEl) {
-    if (previewData.topCommentBody) {
-      commentAuthorEl.textContent = previewData.topCommentAuthor;
-      commentBodyEl.textContent = previewData.topCommentBody;
-      commentSection.classList.remove("hidden");
-    } else {
-      commentSection.classList.add("hidden");
+  if (postData.is_gallery && postData.gallery_data?.items?.length && postData.media_metadata) {
+    const images = postData.gallery_data.items
+      .map((item) => postData.media_metadata?.[item.media_id])
+      .filter((meta) => meta?.s?.u || meta?.s?.gif)
+      .map((meta) => decode(meta.s.u || meta.s.gif));
+    if (images.length) {
+      return images;
     }
   }
 
-  popup.classList.remove("hidden");
-  popup.scrollTop = 0;
+  if (postData.post_hint === "image" && postData.url_overridden_by_dest) {
+    return [decode(postData.url_overridden_by_dest)];
+  }
+
+  const previewImage = postData.preview?.images?.[0]?.source?.url;
+  if (previewImage) {
+    return [decode(previewImage)];
+  }
+
+  return [];
+}
+
+function renderFullContent(fullData) {
+  const popup = getPopupElement();
+  if (!popup || popup.dataset.postUrl !== fullData.postUrl) {
+    return;
+  }
+
+  popup.querySelector(".rh-thumb").classList.add("hidden");
+  popup.querySelector(".rh-show-content-btn").classList.add("hidden");
+
+  const carousel = popup.querySelector(".rh-carousel");
+  if (fullData.images.length) {
+    setupCarousel(carousel, fullData.images);
+    carousel.classList.remove("hidden");
+  } else {
+    carousel.classList.add("hidden");
+  }
+
+  const bodyEl = popup.querySelector(".rh-body");
+  if (fullData.body) {
+    bodyEl.textContent = fullData.body;
+    bodyEl.classList.remove("hidden");
+  } else {
+    bodyEl.classList.add("hidden");
+  }
+
+  const commentSection = popup.querySelector(".rh-comment-section");
+  if (fullData.topCommentBody) {
+    popup.querySelector(".rh-comment-author").textContent = fullData.topCommentAuthor;
+    popup.querySelector(".rh-comment-ups").textContent =
+      fullData.topCommentUps != null ? `${fullData.topCommentUps} upvotes` : "";
+    popup.querySelector(".rh-comment-body").textContent = fullData.topCommentBody;
+    commentSection.classList.remove("hidden");
+  } else {
+    commentSection.classList.add("hidden");
+  }
+}
+
+function setupCarousel(carousel, images) {
+  const imgEl = carousel.querySelector(".rh-carousel-img");
+  const dotsEl = carousel.querySelector(".rh-carousel-dots");
+  const prevBtn = carousel.querySelector(".rh-carousel-prev");
+  const nextBtn = carousel.querySelector(".rh-carousel-next");
+
+  let index = 0;
+
+  function render() {
+    imgEl.src = images[index];
+    dotsEl.innerHTML = images
+      .map((_, i) => `<span class="rh-dot${i === index ? " active" : ""}"></span>`)
+      .join("");
+    const hasMultiple = images.length > 1;
+    prevBtn.classList.toggle("hidden", !hasMultiple);
+    nextBtn.classList.toggle("hidden", !hasMultiple);
+  }
+
+  prevBtn.onclick = (event) => {
+    event.stopPropagation();
+    index = (index - 1 + images.length) % images.length;
+    render();
+  };
+  nextBtn.onclick = (event) => {
+    event.stopPropagation();
+    index = (index + 1) % images.length;
+    render();
+  };
+
+  render();
 }
 
 function isValidPostLink(link) {
