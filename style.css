@@ -69,6 +69,21 @@
   display: none !important;
 }
 
+/* Reddit's own site CSS styles bare <pre> elements (for its code-block
+   markdown rendering) with its own background/color/padding. Our
+   .rh-body/.rh-comment-body are <pre> tags but never declared color or
+   background of their own, so that host styling was free to apply —
+   rendering as dark, low-contrast text on a mismatched light box
+   regardless of our theme. !important guards against the host page using
+   a more specific selector than a bare "pre" to do the same thing. */
+#reddit-hover-popup pre {
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
 #reddit-hover-popup .rh-title {
   margin: 0 0 8px;
   padding-right: 68px;

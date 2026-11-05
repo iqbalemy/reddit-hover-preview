@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.0] - 2026-11-05
+
+### Fixed
+- Post body text and the top comment body render inside `<pre>` tags, which Reddit's own site CSS styles for its code-block markdown rendering (background/color/padding). Since those elements never declared their own color or background, that host styling was free to apply — showing as dark, low-contrast text on a mismatched light box regardless of the popup's own light/dark theme. Explicitly neutralized with `!important` so the popup's own colors always win.
+
 ## [1.9] - 2026-11-05
 
 ### Fixed
