@@ -9,6 +9,7 @@ let enabled = true;
 let hoverTimer = null;
 let hideTimer = null;
 let activePostUrl = "";
+let cursorOverPopup = false;
 
 init();
 
@@ -198,17 +199,28 @@ function setupPopupElement() {
 
   popup.addEventListener("mouseenter", () => {
     clearTimeout(hideTimer);
+    cursorOverPopup = true;
+
+    // Entering the popup is the real signal of intent to engage with this
+    // post, so this is where image bytes start downloading in the
+    // background — not on hover-start, which fires for every post the
+    // cursor merely passes over.
+    const fullData = fullContentCache.get(popup.dataset.postUrl);
+    if (fullData) {
+      maybePrefetchImages(fullData);
+    }
   });
 
   popup.addEventListener("mouseleave", () => {
+    cursorOverPopup = false;
     hideTimer = setTimeout(() => {
       hidePopup(false);
     }, HIDE_DELAY_MS);
   });
 
-  // Image data was already fetched (and its bytes already prefetched)
-  // during hover — this click only reveals the carousel, it makes no
-  // network request of its own.
+  // Image URLs were already fetched during hover; this click only reveals
+  // the carousel. The actual image bytes load here if they weren't
+  // already warmed by the mouseenter prefetch above.
   popup.querySelector(".rh-show-content-btn").addEventListener("click", () => {
     const postUrl = popup.dataset.postUrl;
     const fullData = fullContentCache.get(postUrl);
@@ -290,12 +302,18 @@ function renderQuickPopup(postUrl, quickData) {
     quickData.commentCount ? `${quickData.commentCount} comments` : ""
   ].filter(Boolean).join(" · ");
 
+  const mediaEl = popup.querySelector(".rh-media");
   const thumbEl = popup.querySelector(".rh-thumb");
   if (quickData.thumbnailUrl) {
+    // Reusing the feed's own already-loaded thumbnail costs nothing extra,
+    // so this can show immediately — and fixes the media box's size up
+    // front, before the fetch even resolves.
     thumbEl.src = quickData.thumbnailUrl;
     thumbEl.classList.remove("hidden");
+    mediaEl.classList.add("has-media");
   } else {
     thumbEl.classList.add("hidden");
+    mediaEl.classList.remove("has-media");
   }
 
   popup.querySelector(".rh-carousel").classList.add("hidden");
@@ -357,7 +375,8 @@ async function loadFullContent(postUrl) {
       topCommentAuthor: topCommentData ? `u/${topCommentData.author}` : "",
       topCommentBody: topCommentData?.body?.trim() || "",
       topCommentUps: topCommentData && typeof topCommentData.ups === "number" ? topCommentData.ups : null,
-      mediaRevealed: false
+      mediaRevealed: false,
+      prefetched: false
     };
 
     if (fullContentCache.size > 60) {
@@ -365,7 +384,13 @@ async function loadFullContent(postUrl) {
       fullContentCache.delete(oldestKey);
     }
     fullContentCache.set(postUrl, fullData);
-    prefetchImages(fullData.images);
+
+    // The user may have already moved into the popup while this fetch was
+    // in flight — in that case start the image prefetch immediately
+    // instead of waiting for another mouseenter that won't come.
+    if (cursorOverPopup && popup?.dataset.postUrl === postUrl) {
+      maybePrefetchImages(fullData);
+    }
 
     if (popup?.dataset.postUrl === postUrl) {
       renderFullContent(fullData);
@@ -381,16 +406,22 @@ async function loadFullContent(postUrl) {
   }
 }
 
-// Warms the browser's own image cache while the user is still just
-// hovering, so clicking "Show content" later displays instantly instead
-// of waiting on a fresh download. The first image is prefetched at high
-// priority since it's what the carousel opens on; the rest follow at low
-// priority so they don't compete with it for bandwidth.
-function prefetchImages(urls) {
-  if (!urls.length) {
+// Starts warming the browser's image cache, at most once per post — called
+// once the cursor actually enters the popup (real engagement), not on
+// hover-start, so posts the user merely glances past never trigger a
+// download. By the time "Show content" is clicked, the images are
+// typically already loading or loaded, since reading the auto-shown text
+// takes at least as long.
+function maybePrefetchImages(fullData) {
+  if (fullData.prefetched || !fullData.images.length) {
     return;
   }
 
+  fullData.prefetched = true;
+  prefetchImages(fullData.images);
+}
+
+function prefetchImages(urls) {
   prefetchImage(urls[0], "high");
   if (urls.length > 1) {
     setTimeout(() => {
@@ -478,19 +509,26 @@ function renderFullContent(fullData) {
   renderMedia(popup, fullData);
 }
 
-// Shows the "Show content" button over whatever thumbnail is already
-// displayed until the user clicks it, then swaps to the full carousel —
-// using the already-prefetched images, so the swap is instant.
+// Shows the "Show content" button over whatever thumbnail the feed page
+// itself already had (if any — that costs no extra request, it's already
+// loaded) until the user clicks it, then swaps to the full carousel. The
+// media box keeps a fixed size the whole time (see .has-media in
+// style.css) so this swap never shifts the rest of the popup's layout.
 function renderMedia(popup, fullData) {
+  const mediaEl = popup.querySelector(".rh-media");
   const thumbEl = popup.querySelector(".rh-thumb");
   const showBtn = popup.querySelector(".rh-show-content-btn");
   const carousel = popup.querySelector(".rh-carousel");
 
   if (!fullData.images.length) {
+    mediaEl.classList.remove("has-media");
+    thumbEl.classList.add("hidden");
     showBtn.classList.add("hidden");
     carousel.classList.add("hidden");
     return;
   }
+
+  mediaEl.classList.add("has-media");
 
   if (fullData.mediaRevealed) {
     thumbEl.classList.add("hidden");
@@ -502,11 +540,9 @@ function renderMedia(popup, fullData) {
 
   carousel.classList.add("hidden");
   showBtn.classList.remove("hidden");
-
-  if (thumbEl.classList.contains("hidden")) {
-    thumbEl.src = fullData.images[0];
-    thumbEl.classList.remove("hidden");
-  }
+  // Deliberately do NOT assign the full-size image to thumbEl here — doing
+  // so would silently start downloading it before the user asked for it,
+  // defeating the point of gating media behind a click.
 }
 
 function setupCarousel(carousel, images) {
