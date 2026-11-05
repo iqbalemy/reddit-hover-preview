@@ -130,11 +130,14 @@
   background: rgb(66, 86, 214);
 }
 
+/* Width-constrained only — height is whatever the image's natural aspect
+   ratio works out to, so a tall screenshot stays fully readable instead
+   of being squeezed into a fixed box. The popup itself scrolls
+   vertically if that makes the slide taller than the viewport. */
 #reddit-hover-popup .rh-slide-image {
   display: block;
   width: 100%;
-  height: 220px;
-  object-fit: contain;
+  height: auto;
   background: var(--rh-bg-scroll);
   border-radius: 8px;
 }

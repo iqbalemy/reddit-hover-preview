@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.7] - 2026-11-05
+
+### Fixed
+- Images in the carousel were being squeezed into a fixed 220px-tall box, which crushed tall screenshots (e.g. a long text announcement) into unreadable mush. The image slide is now width-constrained only — height follows the image's natural aspect ratio with no cap, and the popup scrolls vertically if that makes the slide taller than the viewport.
+
 ## [1.6] - 2026-11-05
 
 ### Changed
