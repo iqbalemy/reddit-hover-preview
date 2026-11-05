@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.4] - 2026-11-05
+
+### Changed
+- **Removed the "Show content" button.** Hovering a post now always shows its text body, top comment, and the top comment's upvote count — no click required, and no media shown yet.
+- **The content area is now a single looping carousel** for posts with images: slide 0 is the text/top comment (what you see on hover), and clicking the right arrow steps through slide 1, slide 2, …, the last image, and then back to the text slide again. The left arrow steps the same sequence in reverse. Posts with no images show no arrows at all.
+- Image bytes still only start downloading once the cursor enters the popup (not on hover-start), so clicking into the carousel is fast without fetching images for posts the user only glanced past.
+
 ## [1.3] - 2026-11-05
 
 ### Changed

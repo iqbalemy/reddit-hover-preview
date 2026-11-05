@@ -2,7 +2,7 @@ const SETTINGS_KEY = "hoverPreviewEnabled";
 const HOVER_DELAY_MS = 450;
 const HIDE_DELAY_MS = 140;
 // Post text/comment/image-URL data, fetched once per post on hover and
-// cached here so re-hovering (or re-revealing media) doesn't re-fetch.
+// cached here so re-hovering doesn't re-fetch.
 const fullContentCache = new Map();
 
 let enabled = true;
@@ -10,6 +10,10 @@ let hoverTimer = null;
 let hideTimer = null;
 let activePostUrl = "";
 let cursorOverPopup = false;
+// Slide 0 is always the text/top-comment view; slides 1..N are images.
+// Reset to 0 every time a post is (re-)hovered, per spec: the preview
+// always opens on text first.
+let slideIndex = 0;
 
 init();
 
@@ -104,22 +108,11 @@ function extractQuickDataNewReddit(post) {
   const score = post.getAttribute("score");
   const commentCount = post.getAttribute("comment-count");
 
-  let thumbnailUrl = "";
-  try {
-    const img = post.querySelector(
-      '[slot="thumbnail"] img, [slot="thumbnail"] faceplate-img, img'
-    );
-    thumbnailUrl = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
-  } catch {
-    thumbnailUrl = "";
-  }
-
   return {
     title,
     meta: `${subredditName} by u/${author}`,
     score,
-    commentCount,
-    thumbnailUrl
+    commentCount
   };
 }
 
@@ -131,23 +124,12 @@ function extractQuickDataOldReddit(el) {
   const scoreEl = thing.querySelector?.(".score.unvoted");
   const score = scoreEl?.getAttribute("title") || scoreEl?.textContent?.trim() || "";
   const commentCount = thing.querySelector?.("a.comments")?.textContent?.trim() || "";
-  const thumbnailSrc = thing.querySelector?.("a.thumbnail img")?.getAttribute("src") || "";
-
-  let thumbnailUrl = "";
-  if (thumbnailSrc) {
-    try {
-      thumbnailUrl = new URL(thumbnailSrc, window.location.origin).href;
-    } catch {
-      thumbnailUrl = "";
-    }
-  }
 
   return {
     title,
     meta: `${subreddit} by u/${author}`,
     score,
-    commentCount,
-    thumbnailUrl
+    commentCount
   };
 }
 
@@ -178,23 +160,23 @@ function setupPopupElement() {
     <p class="rh-meta"></p>
     <p class="rh-stats"></p>
     <p class="rh-loading hidden">Loading post…</p>
-    <div class="rh-media">
-      <img class="rh-thumb hidden" alt="" />
-      <button type="button" class="rh-show-content-btn hidden">Show content</button>
-      <div class="rh-carousel hidden">
-        <button type="button" class="rh-carousel-prev hidden" aria-label="Previous image">&#8249;</button>
-        <img class="rh-carousel-img" alt="" />
-        <button type="button" class="rh-carousel-next hidden" aria-label="Next image">&#8250;</button>
-        <div class="rh-carousel-dots"></div>
+    <div class="rh-slides">
+      <button type="button" class="rh-nav-prev hidden" aria-label="Previous">&#8249;</button>
+      <div class="rh-slide-viewport">
+        <div class="rh-slide-text">
+          <pre class="rh-body hidden"></pre>
+          <div class="rh-comment-section hidden">
+            <p class="rh-comment-label">Top comment</p>
+            <p class="rh-comment-author"></p>
+            <p class="rh-comment-ups"></p>
+            <pre class="rh-comment-body"></pre>
+          </div>
+        </div>
+        <img class="rh-slide-image hidden" alt="" />
       </div>
+      <button type="button" class="rh-nav-next hidden" aria-label="Next">&#8250;</button>
     </div>
-    <pre class="rh-body hidden"></pre>
-    <div class="rh-comment-section hidden">
-      <p class="rh-comment-label">Top comment</p>
-      <p class="rh-comment-author"></p>
-      <p class="rh-comment-ups"></p>
-      <pre class="rh-comment-body"></pre>
-    </div>
+    <div class="rh-slide-dots hidden"></div>
   `;
 
   popup.addEventListener("mouseenter", () => {
@@ -218,19 +200,11 @@ function setupPopupElement() {
     }, HIDE_DELAY_MS);
   });
 
-  // Image URLs were already fetched during hover; this click only reveals
-  // the carousel. The actual image bytes load here if they weren't
-  // already warmed by the mouseenter prefetch above.
-  popup.querySelector(".rh-show-content-btn").addEventListener("click", () => {
-    const postUrl = popup.dataset.postUrl;
-    const fullData = fullContentCache.get(postUrl);
-    if (!fullData) {
-      return;
-    }
-
-    fullData.mediaRevealed = true;
-    fullContentCache.set(postUrl, fullData);
-    renderMedia(popup, fullData);
+  popup.querySelector(".rh-nav-prev").addEventListener("click", () => {
+    navigateSlide(popup, -1);
+  });
+  popup.querySelector(".rh-nav-next").addEventListener("click", () => {
+    navigateSlide(popup, 1);
   });
 
   document.body.appendChild(popup);
@@ -256,12 +230,10 @@ function hidePopup(forceHide) {
 }
 
 // Hover handler: renders instantly from data the feed page already has in
-// the DOM, then kicks off the one network fetch that fills in the post's
-// text body and top comment (always shown — no click needed for those).
-// Image media is the only thing still gated behind "Show content": we
-// fetch its URLs up front here too (same request) and start prefetching
-// the image bytes immediately, so revealing the carousel on click is
-// instant instead of waiting on a fresh image download.
+// the DOM (title/meta/stats only — no media), then kicks off the one
+// network fetch that fills in the post's text body, top comment, and
+// image URLs. The preview always opens on the text slide; images only
+// appear once the user navigates the carousel to them.
 function showQuickPreview(context) {
   const normalizedUrl = normalizePostUrl(context.url);
   if (!normalizedUrl) {
@@ -272,6 +244,7 @@ function showQuickPreview(context) {
     return;
   }
   activePostUrl = normalizedUrl;
+  slideIndex = 0;
 
   const quickData = context.kind === "new"
     ? extractQuickDataNewReddit(context.el)
@@ -302,35 +275,21 @@ function renderQuickPopup(postUrl, quickData) {
     quickData.commentCount ? `${quickData.commentCount} comments` : ""
   ].filter(Boolean).join(" · ");
 
-  const mediaEl = popup.querySelector(".rh-media");
-  const thumbEl = popup.querySelector(".rh-thumb");
-  if (quickData.thumbnailUrl) {
-    // Reusing the feed's own already-loaded thumbnail costs nothing extra,
-    // so this can show immediately — and fixes the media box's size up
-    // front, before the fetch even resolves.
-    thumbEl.src = quickData.thumbnailUrl;
-    thumbEl.classList.remove("hidden");
-    mediaEl.classList.add("has-media");
-  } else {
-    thumbEl.classList.add("hidden");
-    mediaEl.classList.remove("has-media");
-  }
-
-  popup.querySelector(".rh-carousel").classList.add("hidden");
-  popup.querySelector(".rh-show-content-btn").classList.add("hidden");
   popup.querySelector(".rh-body").classList.add("hidden");
   popup.querySelector(".rh-comment-section").classList.add("hidden");
+  popup.querySelector(".rh-slide-image").classList.add("hidden");
+  popup.querySelector(".rh-slide-text").classList.remove("hidden");
+  popup.querySelector(".rh-nav-prev").classList.add("hidden");
+  popup.querySelector(".rh-nav-next").classList.add("hidden");
+  popup.querySelector(".rh-slide-dots").classList.add("hidden");
   popup.querySelector(".rh-loading").classList.remove("hidden");
 
   popup.classList.remove("hidden");
   popup.scrollTop = 0;
 }
 
-// Fetches the post's text body, top comment, and image URLs. Runs
-// automatically on hover (text/comment are always shown), since that's
-// the one network request the whole preview needs — image *bytes* are
-// prefetched here too, in the background, so the only thing left for the
-// "Show content" click to do is reveal an already-loaded carousel.
+// Fetches the post's text body, top comment, and image URLs — the one
+// network request the whole preview needs, run automatically on hover.
 async function loadFullContent(postUrl) {
   if (!postUrl) {
     return;
@@ -375,7 +334,6 @@ async function loadFullContent(postUrl) {
       topCommentAuthor: topCommentData ? `u/${topCommentData.author}` : "",
       topCommentBody: topCommentData?.body?.trim() || "",
       topCommentUps: topCommentData && typeof topCommentData.ups === "number" ? topCommentData.ups : null,
-      mediaRevealed: false,
       prefetched: false
     };
 
@@ -409,9 +367,9 @@ async function loadFullContent(postUrl) {
 // Starts warming the browser's image cache, at most once per post — called
 // once the cursor actually enters the popup (real engagement), not on
 // hover-start, so posts the user merely glances past never trigger a
-// download. By the time "Show content" is clicked, the images are
-// typically already loading or loaded, since reading the auto-shown text
-// takes at least as long.
+// download. By the time the carousel is clicked to an image, it's
+// typically already loading or loaded, since reading the text first takes
+// at least as long.
 function maybePrefetchImages(fullData) {
   if (fullData.prefetched || !fullData.images.length) {
     return;
@@ -466,8 +424,6 @@ function extractImages(postData) {
   return [];
 }
 
-// Text and top comment are always shown once loaded — only the image
-// media stays gated behind the "Show content" click (see renderMedia).
 function renderFullContent(fullData) {
   const popup = getPopupElement();
   if (!popup || popup.dataset.postUrl !== fullData.postUrl) {
@@ -487,94 +443,73 @@ function renderFullContent(fullData) {
     fullData.commentCount ? `${fullData.commentCount} comments` : ""
   ].filter(Boolean).join(" · ");
 
-  const bodyEl = popup.querySelector(".rh-body");
-  if (fullData.body) {
-    bodyEl.textContent = fullData.body;
-    bodyEl.classList.remove("hidden");
-  } else {
-    bodyEl.classList.add("hidden");
-  }
+  const hasImages = fullData.images.length > 0;
+  popup.querySelector(".rh-nav-prev").classList.toggle("hidden", !hasImages);
+  popup.querySelector(".rh-nav-next").classList.toggle("hidden", !hasImages);
+  popup.querySelector(".rh-slide-dots").classList.toggle("hidden", !hasImages);
 
-  const commentSection = popup.querySelector(".rh-comment-section");
-  if (fullData.topCommentBody) {
-    popup.querySelector(".rh-comment-author").textContent = fullData.topCommentAuthor;
-    popup.querySelector(".rh-comment-ups").textContent =
-      fullData.topCommentUps != null ? `${fullData.topCommentUps} upvotes` : "";
-    popup.querySelector(".rh-comment-body").textContent = fullData.topCommentBody;
-    commentSection.classList.remove("hidden");
-  } else {
-    commentSection.classList.add("hidden");
-  }
-
-  renderMedia(popup, fullData);
+  showSlide(popup, fullData, slideIndex);
 }
 
-// Shows the "Show content" button over whatever thumbnail the feed page
-// itself already had (if any — that costs no extra request, it's already
-// loaded) until the user clicks it, then swaps to the full carousel. The
-// media box keeps a fixed size the whole time (see .has-media in
-// style.css) so this swap never shifts the rest of the popup's layout.
-function renderMedia(popup, fullData) {
-  const mediaEl = popup.querySelector(".rh-media");
-  const thumbEl = popup.querySelector(".rh-thumb");
-  const showBtn = popup.querySelector(".rh-show-content-btn");
-  const carousel = popup.querySelector(".rh-carousel");
-
-  if (!fullData.images.length) {
-    mediaEl.classList.remove("has-media");
-    thumbEl.classList.add("hidden");
-    showBtn.classList.add("hidden");
-    carousel.classList.add("hidden");
+function navigateSlide(popup, delta) {
+  const fullData = fullContentCache.get(popup.dataset.postUrl);
+  if (!fullData || !fullData.images.length) {
     return;
   }
 
-  mediaEl.classList.add("has-media");
-
-  if (fullData.mediaRevealed) {
-    thumbEl.classList.add("hidden");
-    showBtn.classList.add("hidden");
-    setupCarousel(carousel, fullData.images);
-    carousel.classList.remove("hidden");
-    return;
-  }
-
-  carousel.classList.add("hidden");
-  showBtn.classList.remove("hidden");
-  // Deliberately do NOT assign the full-size image to thumbEl here — doing
-  // so would silently start downloading it before the user asked for it,
-  // defeating the point of gating media behind a click.
+  showSlide(popup, fullData, slideIndex + delta);
 }
 
-function setupCarousel(carousel, images) {
-  const imgEl = carousel.querySelector(".rh-carousel-img");
-  const dotsEl = carousel.querySelector(".rh-carousel-dots");
-  const prevBtn = carousel.querySelector(".rh-carousel-prev");
-  const nextBtn = carousel.querySelector(".rh-carousel-next");
+// Renders one slide of the text/images sequence: slide 0 is always the
+// text body + top comment, slides 1..N are images[0..N-1]. Navigation
+// wraps around in both directions — clicking past the last image lands
+// back on the text slide, and clicking "previous" from the text slide
+// lands on the last image.
+function showSlide(popup, fullData, requestedIndex) {
+  const totalSlides = fullData.images.length + 1;
+  slideIndex = ((requestedIndex % totalSlides) + totalSlides) % totalSlides;
 
-  let index = 0;
+  const textEl = popup.querySelector(".rh-slide-text");
+  const imageEl = popup.querySelector(".rh-slide-image");
 
-  function render() {
-    imgEl.src = images[index];
-    dotsEl.innerHTML = images
-      .map((_, i) => `<span class="rh-dot${i === index ? " active" : ""}"></span>`)
-      .join("");
-    const hasMultiple = images.length > 1;
-    prevBtn.classList.toggle("hidden", !hasMultiple);
-    nextBtn.classList.toggle("hidden", !hasMultiple);
+  if (slideIndex === 0) {
+    imageEl.classList.add("hidden");
+    imageEl.removeAttribute("src");
+    textEl.classList.remove("hidden");
+
+    const bodyEl = popup.querySelector(".rh-body");
+    if (fullData.body) {
+      bodyEl.textContent = fullData.body;
+      bodyEl.classList.remove("hidden");
+    } else {
+      bodyEl.classList.add("hidden");
+    }
+
+    const commentSection = popup.querySelector(".rh-comment-section");
+    if (fullData.topCommentBody) {
+      popup.querySelector(".rh-comment-author").textContent = fullData.topCommentAuthor;
+      popup.querySelector(".rh-comment-ups").textContent =
+        fullData.topCommentUps != null ? `${fullData.topCommentUps} upvotes` : "";
+      popup.querySelector(".rh-comment-body").textContent = fullData.topCommentBody;
+      commentSection.classList.remove("hidden");
+    } else {
+      commentSection.classList.add("hidden");
+    }
+  } else {
+    textEl.classList.add("hidden");
+    imageEl.src = fullData.images[slideIndex - 1];
+    imageEl.classList.remove("hidden");
   }
 
-  prevBtn.onclick = (event) => {
-    event.stopPropagation();
-    index = (index - 1 + images.length) % images.length;
-    render();
-  };
-  nextBtn.onclick = (event) => {
-    event.stopPropagation();
-    index = (index + 1) % images.length;
-    render();
-  };
+  updateDots(popup, totalSlides);
+}
 
-  render();
+function updateDots(popup, totalSlides) {
+  const dotsEl = popup.querySelector(".rh-slide-dots");
+  dotsEl.innerHTML = Array.from(
+    { length: totalSlides },
+    (_, i) => `<span class="rh-dot${i === slideIndex ? " active" : ""}"></span>`
+  ).join("");
 }
 
 function isValidPostLink(link) {

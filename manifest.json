@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Reddit Hover Preview",
-  "version": "1.3",
-  "description": "Hover over any Reddit post to preview its title, full text, and top comment (with upvotes) automatically. Click \"Show content\" to reveal the image gallery, prefetched in the background for an instant carousel. Works in card and compact view.",
+  "version": "1.4",
+  "description": "Hover over any Reddit post to preview its title, full text, and top comment (with upvotes) automatically. If the post has images, a carousel arrow cycles through them and back to the text. Works in card and compact view.",
   "permissions": ["storage"],
   "host_permissions": [
     "https://www.reddit.com/*",
