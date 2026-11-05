@@ -33,6 +33,10 @@
      since a fixed element doesn't scroll with the page. */
   max-height: calc(100vh - 120px - 20px);
   overflow-y: auto;
+  /* Without this, scrolling with the cursor over the popup falls through
+     to the Reddit page underneath once the popup's own content runs out
+     of room to scroll (or has no overflow at all). */
+  overscroll-behavior: contain;
   background: var(--rh-bg);
   border: 1px solid var(--rh-border);
   padding: 15px;

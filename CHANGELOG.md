@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.9] - 2026-11-05
+
+### Fixed
+- Scrolling the mouse wheel while over the popup no longer scrolls the Reddit page underneath once the popup's own content has nothing left to scroll (or doesn't overflow at all). Added `overscroll-behavior: contain` to stop that scroll chaining.
+
 ## [1.8] - 2026-11-05
 
 ### Changed
