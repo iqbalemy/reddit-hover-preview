@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.5] - 2026-11-05
+
+### Fixed
+- Carousel nav arrows no longer jump around between slides of different heights (e.g. a short image next to a long text body). They're now pinned to the popup's own top-right corner — fixed relative to the popup frame, not to the slide content — so their position never changes regardless of what's currently shown. Styled as solid blue circular buttons to stand out from the rest of the panel.
+
 ## [1.4] - 2026-11-05
 
 ### Changed

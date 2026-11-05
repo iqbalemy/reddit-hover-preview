@@ -156,12 +156,13 @@ function setupPopupElement() {
   popup.id = "reddit-hover-popup";
   popup.classList.add("hidden");
   popup.innerHTML = `
+    <button type="button" class="rh-nav-prev hidden" aria-label="Previous">&#8249;</button>
+    <button type="button" class="rh-nav-next hidden" aria-label="Next">&#8250;</button>
     <h4 class="rh-title"></h4>
     <p class="rh-meta"></p>
     <p class="rh-stats"></p>
     <p class="rh-loading hidden">Loading post…</p>
     <div class="rh-slides">
-      <button type="button" class="rh-nav-prev hidden" aria-label="Previous">&#8249;</button>
       <div class="rh-slide-viewport">
         <div class="rh-slide-text">
           <pre class="rh-body hidden"></pre>
@@ -174,7 +175,6 @@ function setupPopupElement() {
         </div>
         <img class="rh-slide-image hidden" alt="" />
       </div>
-      <button type="button" class="rh-nav-next hidden" aria-label="Next">&#8250;</button>
     </div>
     <div class="rh-slide-dots hidden"></div>
   `;

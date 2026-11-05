@@ -63,6 +63,7 @@
 
 #reddit-hover-popup .rh-title {
   margin: 0 0 8px;
+  padding-right: 68px;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.35;
@@ -89,35 +90,40 @@
 }
 
 /* The whole content area below the title/meta/stats is one carousel:
-   slide 0 is always the text + top comment, slides 1..N are images. Nav
-   arrows sit beside the slide viewport so they never overlap the text as
-   its height varies, and stay in the same place when swapping to a
-   fixed-height image slide. */
-#reddit-hover-popup .rh-slides {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
+   slide 0 is always the text + top comment, slides 1..N are images.
+   The nav arrows are pinned to the popup's own top-right corner — fixed
+   relative to the popup frame itself, not to the slide content — so they
+   never move no matter how tall or short the current slide is. */
 #reddit-hover-popup .rh-nav-prev,
 #reddit-hover-popup .rh-nav-next {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  line-height: 24px;
+  position: absolute;
+  top: 12px;
+  width: 28px;
+  height: 28px;
+  line-height: 26px;
   text-align: center;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
-  color: var(--rh-text);
-  background: var(--rh-bg-scroll);
-  border: 1px solid var(--rh-border);
+  color: #fff;
+  background: rgb(83, 104, 235);
+  border: none;
   border-radius: 50%;
   cursor: pointer;
+  z-index: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
-#reddit-hover-popup .rh-slide-viewport {
-  flex: 1 1 auto;
-  min-width: 0;
+#reddit-hover-popup .rh-nav-next {
+  right: 12px;
+}
+
+#reddit-hover-popup .rh-nav-prev {
+  right: 46px;
+}
+
+#reddit-hover-popup .rh-nav-prev:hover,
+#reddit-hover-popup .rh-nav-next:hover {
+  background: rgb(66, 86, 214);
 }
 
 #reddit-hover-popup .rh-slide-image {
