@@ -537,6 +537,10 @@ function normalizePostUrl(rawUrl) {
   }
 }
 
+// limit=1&depth=1 asks Reddit for just the single top-level top comment
+// instead of its default (much larger) comment tree, since that's all we
+// ever read from the response — cuts payload size and parse time
+// noticeably on posts with hundreds of comments.
 function buildJsonUrl(normalizedUrl) {
-  return `${normalizedUrl}.json?raw_json=1`;
+  return `${normalizedUrl}.json?raw_json=1&limit=1&depth=1`;
 }

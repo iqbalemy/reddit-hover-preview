@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.8] - 2026-11-05
+
+### Changed
+- The post fetch now asks Reddit for just the single top-level comment (`limit=1&depth=1`) instead of its full default-size comment tree, since that's the only thing read from the response. Cuts payload size and parse time noticeably on heavily-commented posts, which was a big part of why loading felt slow.
+
 ## [1.7] - 2026-11-05
 
 ### Fixed
