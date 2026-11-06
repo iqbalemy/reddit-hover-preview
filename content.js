@@ -256,6 +256,7 @@ function showQuickPreview(context) {
     ? extractQuickDataNewReddit(context.el)
     : extractQuickDataOldReddit(context.el);
 
+  positionPopup(context.el);
   renderQuickPopup(normalizedUrl, quickData);
 
   const cachedFull = fullContentCache.get(normalizedUrl);
@@ -264,6 +265,51 @@ function showQuickPreview(context) {
   } else {
     void loadFullContent(normalizedUrl);
   }
+}
+
+// Places the popup right next to the hovered post instead of a fixed
+// spot on the page. A fixed spot (e.g. top-right corner) can end up far
+// from a post hovered near the bottom of a tall viewport, and the cursor
+// has to cross that gap to reach the popup — overshooting it, or simply
+// taking longer than the hide grace period, dismisses the popup before
+// the user can interact with it. Positioning beside the post instead
+// keeps that gap small no matter where in the page the post sits.
+function positionPopup(el) {
+  const popup = getPopupElement();
+  if (!popup || !el) {
+    return;
+  }
+
+  const margin = 12;
+  const gap = 8;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const rect = el.getBoundingClientRect();
+  const popupWidth = Math.min(420, vw - margin * 2);
+
+  // Prefer whichever side of the post has more room, so the popup is as
+  // close as possible to where the cursor already is.
+  const spaceRight = vw - rect.right;
+  const spaceLeft = rect.left;
+  let left;
+  if (spaceRight >= popupWidth + gap || spaceRight >= spaceLeft) {
+    left = Math.min(rect.right + gap, vw - popupWidth - margin);
+  } else {
+    left = rect.left - popupWidth - gap;
+  }
+  left = Math.max(margin, left);
+
+  // Vertically align with the post, clamped so the popup always stays
+  // fully on-screen (and leaves enough room to actually show something)
+  // regardless of where in the feed the post sits.
+  const minVisibleHeight = 160;
+  const top = Math.max(margin, Math.min(rect.top, vh - margin - minVisibleHeight));
+  const maxHeight = vh - top - margin;
+
+  popup.style.left = `${left}px`;
+  popup.style.right = "auto";
+  popup.style.top = `${top}px`;
+  popup.style.maxHeight = `${maxHeight}px`;
 }
 
 function renderQuickPopup(postUrl, quickData) {
