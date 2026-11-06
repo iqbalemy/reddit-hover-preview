@@ -215,13 +215,18 @@
 }
 
 #reddit-hover-popup .rh-gate-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 8px 18px;
   border: none;
   border-radius: 999px;
   background: rgb(83, 104, 235);
   color: #fff;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1;
   cursor: pointer;
 }
 
