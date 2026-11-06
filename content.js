@@ -141,7 +141,11 @@ function resolvePostContext(target) {
       post.getAttribute("permalink") || post.getAttribute("content-href");
     if (permalink) {
       try {
-        return { url: new URL(permalink, window.location.origin).href, kind: "new", el: post };
+        const url = new URL(permalink, window.location.origin);
+        if (!/(^|\.)reddit\.com$/i.test(url.hostname)) {
+          return null;
+        }
+        return { url: url.href, kind: "new", el: post };
       } catch {
         return null;
       }
