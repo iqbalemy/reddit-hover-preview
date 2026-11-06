@@ -266,8 +266,12 @@ function setupPopupElement() {
   popup.id = "reddit-hover-popup";
   popup.classList.add("hidden");
   popup.innerHTML = `
-    <button type="button" class="rh-nav-prev hidden" aria-label="Previous">&#8249;</button>
-    <button type="button" class="rh-nav-next hidden" aria-label="Next">&#8250;</button>
+    <button type="button" class="rh-nav-prev hidden" aria-label="Previous">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
+    <button type="button" class="rh-nav-next hidden" aria-label="Next">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
     <h4 class="rh-title"></h4>
     <p class="rh-meta"></p>
     <p class="rh-stats"></p>
