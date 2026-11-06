@@ -139,10 +139,13 @@
   top: 12px;
   width: 28px;
   height: 28px;
-  line-height: 26px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
   font-size: 17px;
   font-weight: 700;
+  line-height: 1;
   color: #fff;
   background: rgb(83, 104, 235);
   border: none;
