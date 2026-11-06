@@ -129,8 +129,17 @@ function init() {
   });
 }
 
+// True once the extension is reloaded/updated (dev-mode reload, or an
+// auto-update) while this tab's content script is still running — Chrome
+// tears down chrome.runtime in that orphaned context, so every call into
+// it throws. Nothing short of reloading the page fixes that, so callers
+// use this to fail quietly instead of surfacing a raw TypeError.
+function isExtensionContextValid() {
+  return typeof chrome !== "undefined" && !!chrome.runtime && !!chrome.runtime.id;
+}
+
 function onMouseOver(event) {
-  if (!enabled) {
+  if (!enabled || !isExtensionContextValid()) {
     return;
   }
 
@@ -540,6 +549,10 @@ function ensurePrefetched(postUrl, isCardView) {
 // images entirely — see isCardViewPost() for why.
 async function loadFullContent(postUrl, isCardView) {
   if (!postUrl || fetchUrl === postUrl) {
+    return;
+  }
+
+  if (!isExtensionContextValid()) {
     return;
   }
 
