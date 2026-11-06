@@ -47,6 +47,14 @@
   color: var(--rh-text);
   box-shadow: 0 14px 34px var(--rh-shadow);
   color-scheme: light dark;
+  /* Fades out over the same span as the JS hide delay (HIDE_DELAY_MS)
+     instead of vanishing instantly. visibility's own transition is
+     delayed by that same duration so the popup stays interactive/
+     focusable for the length of the fade and only then drops out of the
+     layout/tab order — appearing is still instant (no delay below). */
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 350ms ease, visibility 0s linear 0s;
 }
 
 /* Scrollbar styling */
@@ -62,7 +70,10 @@
 }
 
 #reddit-hover-popup.hidden {
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 350ms ease, visibility 0s linear 350ms;
 }
 
 #reddit-hover-popup .hidden {

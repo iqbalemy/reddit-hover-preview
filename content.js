@@ -1,5 +1,9 @@
 const SETTINGS_KEY = "hoverPreviewEnabled";
 const HOVER_DELAY_MS = 450;
+// Keep this in sync with the opacity transition duration on
+// #reddit-hover-popup / #reddit-hover-popup.hidden in style.css — that's
+// what makes the popup fade out over this same span instead of vanishing
+// instantly.
 const HIDE_DELAY_MS = 350;
 // Post text/comment/image-URL data, fetched once per post on hover and
 // cached here so re-hovering doesn't re-fetch.
