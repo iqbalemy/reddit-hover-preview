@@ -47,6 +47,19 @@
   color: var(--rh-text);
   box-shadow: 0 14px 34px var(--rh-shadow);
   color-scheme: light dark;
+  /* Fades out instead of vanishing instantly — a purely visual timing,
+     deliberately independent of the JS HIDE_DELAY_MS grace period (which
+     has to stay short, below HOVER_DELAY_MS — see content.js). visibility's
+     own transition is delayed by the same span as the opacity fade so the
+     popup stays interactive/focusable for the length of the fade and only
+     then drops out of the layout/tab order — appearing is still instant
+     (no delay below). !important on opacity/transition guards against
+     Reddit's own site CSS forcing near-zero transition durations (e.g. a
+     blanket prefers-reduced-motion override), the same risk noted below
+     for the bare `pre` styling. */
+  opacity: 1 !important;
+  visibility: visible;
+  transition: opacity 500ms ease, visibility 0s linear 0s !important;
 }
 
 /* Scrollbar styling */
@@ -62,7 +75,10 @@
 }
 
 #reddit-hover-popup.hidden {
-  display: none;
+  opacity: 0 !important;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 500ms ease, visibility 0s linear 500ms !important;
 }
 
 #reddit-hover-popup .hidden {
@@ -123,10 +139,13 @@
   top: 12px;
   width: 28px;
   height: 28px;
-  line-height: 26px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
   font-size: 17px;
   font-weight: 700;
+  line-height: 1;
   color: #fff;
   background: rgb(83, 104, 235);
   border: none;
@@ -159,6 +178,63 @@
   height: auto;
   background: var(--rh-bg-scroll);
   border-radius: 8px;
+}
+
+/* Holds the image and its gate overlay in the same positioning context,
+   so the overlay's position: absolute below is relative to the image
+   area specifically, not the whole popup. */
+#reddit-hover-popup .rh-slide-viewport {
+  position: relative;
+}
+
+/* Blurs a gated image (nsfw/spoiler/no-real-thumbnail) rather than
+   hiding it outright — "Show content" sits on top of it via rh-slide-gate
+   below, same idea as Reddit's own spoiler/nsfw treatment. */
+#reddit-hover-popup .rh-slide-image.gated {
+  filter: blur(24px);
+}
+
+#reddit-hover-popup .rh-slide-gate {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+}
+
+#reddit-hover-popup .rh-gate-remark {
+  margin: 0;
+  max-width: 85%;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+#reddit-hover-popup .rh-gate-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 999px;
+  background: rgb(83, 104, 235);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#reddit-hover-popup .rh-gate-button:hover {
+  background: rgb(66, 86, 214);
 }
 
 #reddit-hover-popup .rh-slide-dots {

@@ -1,15 +1,37 @@
 // Fetches post preview JSON on behalf of content scripts. Running here
 // (rather than in the page context) avoids the host page's Content-Security
 // Policy, which blocks content-script fetches to reddit's JSON API.
+
+// Keyed by the content script's requestId (its normalized post URL) so a
+// CANCEL_PREVIEW_JSON message can abort the matching in-flight fetch —
+// content.js only ever keeps one request in flight at a time, cancelling
+// the previous one whenever hovering moves on to a different post before
+// it resolves.
+const inFlightControllers = new Map();
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "CANCEL_PREVIEW_JSON") {
+    const controller = inFlightControllers.get(message.requestId);
+    if (controller) {
+      controller.abort();
+      inFlightControllers.delete(message.requestId);
+    }
+    return false;
+  }
+
   if (!message || message.type !== "FETCH_PREVIEW_JSON") {
     return false;
+  }
+
+  const controller = new AbortController();
+  if (message.requestId) {
+    inFlightControllers.set(message.requestId, controller);
   }
 
   // Reddit now rejects most cookie-less JSON requests with 403 or a block
   // page. "include" attaches the user's existing reddit.com session cookie
   // (same site the user is already signed into) instead of a third party.
-  fetch(message.url, { credentials: "include" })
+  fetch(message.url, { credentials: "include", signal: controller.signal })
     .then(async (response) => {
       if (!response.ok) {
         sendResponse({ ok: false, error: `Request failed: ${response.status}` });
@@ -28,7 +50,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: true, payload });
     })
     .catch((error) => {
-      sendResponse({ ok: false, error: error?.message || "Network error" });
+      if (error?.name === "AbortError") {
+        sendResponse({ ok: false, aborted: true });
+      } else {
+        sendResponse({ ok: false, error: error?.message || "Network error" });
+      }
+    })
+    .finally(() => {
+      if (message.requestId) {
+        inFlightControllers.delete(message.requestId);
+      }
     });
 
   return true;
