@@ -254,6 +254,10 @@ function setupPopupElement() {
       </div>
     </div>
     <div class="rh-slide-dots hidden"></div>
+    <div class="rh-reply hidden">
+      <textarea class="rh-reply-input" rows="2" placeholder="Reply to this post"></textarea>
+      <button type="button" class="rh-reply-button">Reply</button>
+    </div>
   `;
 
   popup.addEventListener("mouseenter", () => {
@@ -294,6 +298,12 @@ function setupPopupElement() {
     }
     fullData.revealed = true;
     showSlide(popup, fullData, slideIndex);
+  });
+
+  // Not wired up to Reddit yet — placeholder until comment submission is
+  // implemented. Just clears the box so the button isn't a dead no-op.
+  popup.querySelector(".rh-reply-button").addEventListener("click", () => {
+    popup.querySelector(".rh-reply-input").value = "";
   });
 
   document.body.appendChild(popup);
@@ -365,7 +375,7 @@ function showQuickPreview(context) {
     ? extractQuickDataNewReddit(context.el)
     : extractQuickDataOldReddit(context.el);
 
-  renderQuickPopup(normalizedUrl, quickData);
+  renderQuickPopup(normalizedUrl, quickData, !isCardViewPost(context));
 
   const cachedFull = fullContentCache.get(normalizedUrl);
   if (cachedFull) {
@@ -375,13 +385,18 @@ function showQuickPreview(context) {
   }
 }
 
-function renderQuickPopup(postUrl, quickData) {
+// `showReply` is true for old Reddit and new Reddit's compact view — card
+// view already shows a reply affordance inline in the feed itself, so our
+// own box would be redundant there (same split as isCardViewPost()).
+function renderQuickPopup(postUrl, quickData, showReply) {
   const popup = getPopupElement();
   if (!popup) {
     return;
   }
 
   popup.dataset.postUrl = postUrl;
+  popup.querySelector(".rh-reply").classList.toggle("hidden", !showReply);
+  popup.querySelector(".rh-reply-input").value = "";
 
   popup.querySelector(".rh-title").textContent = quickData.title;
   popup.querySelector(".rh-meta").textContent = quickData.meta;

@@ -289,3 +289,50 @@
   font-family: inherit;
   font-size: 13px;
 }
+
+#reddit-hover-popup .rh-reply {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rh-border);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+#reddit-hover-popup .rh-reply-input {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  padding: 7px 10px;
+  border: 1px solid var(--rh-border);
+  border-radius: 8px;
+  background: var(--rh-bg-scroll);
+  color: var(--rh-text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+#reddit-hover-popup .rh-reply-input:focus {
+  outline: 2px solid rgb(83, 104, 235);
+  outline-offset: -1px;
+}
+
+#reddit-hover-popup .rh-reply-button {
+  flex-shrink: 0;
+  align-self: flex-start;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: rgb(83, 104, 235);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#reddit-hover-popup .rh-reply-button:hover {
+  background: rgb(66, 86, 214);
+}
