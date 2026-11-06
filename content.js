@@ -1,10 +1,11 @@
 const SETTINGS_KEY = "hoverPreviewEnabled";
 const HOVER_DELAY_MS = 450;
-// Keep this in sync with the opacity transition duration on
-// #reddit-hover-popup / #reddit-hover-popup.hidden in style.css — that's
-// what makes the popup fade out over this same span instead of vanishing
-// instantly.
-const HIDE_DELAY_MS = 500;
+// Must stay below HOVER_DELAY_MS, or quickly moving the cursor from one
+// post to the next post's own hover delay can overlap awkwardly with
+// this one still counting down. Deliberately NOT tied to the CSS fade
+// duration (see #reddit-hover-popup.hidden in style.css) — that's a
+// separate, purely visual timing with no such constraint.
+const HIDE_DELAY_MS = 350;
 // Forgives a cursor that overshoots the popup's edge by this many CSS
 // pixels (e.g. aiming for its scrollbar, or the gap between the nav
 // arrows and the border) — see isPointerNearPopup().
