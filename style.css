@@ -27,8 +27,16 @@
   right: 20px;
   top: 120px;
   width: min(420px, calc(100vw - 30px));
-  max-height: 70vh;
+  /* Fill down to near the bottom of the actual browser viewport instead of
+     a flat vh fraction, which either wastes space on tall windows or — on
+     short ones — can push past the bottom edge with no way to reach it,
+     since a fixed element doesn't scroll with the page. */
+  max-height: calc(100vh - 120px - 20px);
   overflow-y: auto;
+  /* Without this, scrolling with the cursor over the popup falls through
+     to the Reddit page underneath once the popup's own content runs out
+     of room to scroll (or has no overflow at all). */
+  overscroll-behavior: contain;
   background: var(--rh-bg);
   border: 1px solid var(--rh-border);
   padding: 15px;
@@ -57,23 +65,122 @@
   display: none;
 }
 
+#reddit-hover-popup .hidden {
+  display: none !important;
+}
+
+/* Reddit's own site CSS styles bare <pre> elements (for its code-block
+   markdown rendering) with its own background/color/padding. Our
+   .rh-body/.rh-comment-body are <pre> tags but never declared color or
+   background of their own, so that host styling was free to apply —
+   rendering as dark, low-contrast text on a mismatched light box
+   regardless of our theme. !important guards against the host page using
+   a more specific selector than a bare "pre" to do the same thing. */
+#reddit-hover-popup pre {
+  background: transparent !important;
+  color: inherit !important;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
 #reddit-hover-popup .rh-title {
   margin: 0 0 8px;
+  padding-right: 68px;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.35;
 }
 
 #reddit-hover-popup .rh-meta {
-  margin: 0 0 10px;
+  margin: 0 0 4px;
   color: var(--rh-meta);
   font-size: 12px;
 }
 
+#reddit-hover-popup .rh-stats {
+  margin: 0 0 10px;
+  color: var(--rh-meta);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#reddit-hover-popup .rh-loading {
+  margin: 0 0 10px;
+  color: var(--rh-meta);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* The whole content area below the title/meta/stats is one carousel:
+   slide 0 is always the text + top comment, slides 1..N are images.
+   The nav arrows are pinned to the popup's own top-right corner — fixed
+   relative to the popup frame itself, not to the slide content — so they
+   never move no matter how tall or short the current slide is. */
+#reddit-hover-popup .rh-nav-prev,
+#reddit-hover-popup .rh-nav-next {
+  position: absolute;
+  top: 12px;
+  width: 28px;
+  height: 28px;
+  line-height: 26px;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  background: rgb(83, 104, 235);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+#reddit-hover-popup .rh-nav-next {
+  right: 12px;
+}
+
+#reddit-hover-popup .rh-nav-prev {
+  right: 46px;
+}
+
+#reddit-hover-popup .rh-nav-prev:hover,
+#reddit-hover-popup .rh-nav-next:hover {
+  background: rgb(66, 86, 214);
+}
+
+/* Width-constrained only — height is whatever the image's natural aspect
+   ratio works out to, so a tall screenshot stays fully readable instead
+   of being squeezed into a fixed box. The popup itself scrolls
+   vertically if that makes the slide taller than the viewport. */
+#reddit-hover-popup .rh-slide-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--rh-bg-scroll);
+  border-radius: 8px;
+}
+
+#reddit-hover-popup .rh-slide-dots {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+}
+
+#reddit-hover-popup .rh-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rh-border);
+}
+
+#reddit-hover-popup .rh-dot.active {
+  background: var(--rh-meta);
+}
+
 #reddit-hover-popup .rh-body {
   margin: 0;
-  padding-top: 8px;
-  border-top: 1px solid var(--rh-border);
   white-space: pre-wrap;
   font-family: inherit;
 }
@@ -82,10 +189,6 @@
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--rh-border);
-}
-
-#reddit-hover-popup .rh-comment-section.hidden {
-  display: none;
 }
 
 #reddit-hover-popup .rh-comment-label {

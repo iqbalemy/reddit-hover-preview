@@ -1,12 +1,19 @@
 const SETTINGS_KEY = "hoverPreviewEnabled";
 const HOVER_DELAY_MS = 450;
 const HIDE_DELAY_MS = 140;
-const previewCache = new Map();
+// Post text/comment/image-URL data, fetched once per post on hover and
+// cached here so re-hovering doesn't re-fetch.
+const fullContentCache = new Map();
 
 let enabled = true;
 let hoverTimer = null;
 let hideTimer = null;
 let activePostUrl = "";
+let cursorOverPopup = false;
+// Slide 0 is always the text/top-comment view; slides 1..N are images.
+// Reset to 0 every time a post is (re-)hovered, per spec: the preview
+// always opens on text first.
+let slideIndex = 0;
 
 init();
 
@@ -42,8 +49,8 @@ function onMouseOver(event) {
     return;
   }
 
-  const postUrl = resolvePostUrl(event.target);
-  if (!postUrl) {
+  const context = resolvePostContext(event.target);
+  if (!context) {
     return;
   }
 
@@ -51,20 +58,26 @@ function onMouseOver(event) {
   clearTimeout(hoverTimer);
 
   hoverTimer = setTimeout(() => {
-    void loadPreview(postUrl);
+    showQuickPreview(context);
   }, HOVER_DELAY_MS);
 }
 
-// Resolves the Reddit post URL for the hovered element.
-// Old Reddit (and plain title links) use a real <a href="/comments/...">.
-// New Reddit's card/compact feed rows are <shreddit-post> web components:
-// hovering the card background retargets event.target to the <shreddit-post>
-// host itself (shadow DOM retargeting), so we fall back to its
-// "permalink"/"content-href" attribute to cover that layout too.
-function resolvePostUrl(target) {
+// Resolves the Reddit post URL *and* the DOM node that already holds that
+// post's feed-row data for the hovered element. Old Reddit (and plain title
+// links) use a real <a href="/comments/...">, with the rest of the row's
+// data living on the ancestor ".thing". New Reddit's card/compact feed rows
+// are <shreddit-post> web components: hovering the card background
+// retargets event.target to the <shreddit-post> host itself (shadow DOM
+// retargeting), so we fall back to its "permalink"/"content-href" attribute
+// to cover that layout too, and scrape the rest straight off the element.
+//
+// Deliberately read-only and synchronous: used only for the instant
+// quick-preview shown before the real fetch (see showQuickPreview/
+// loadFullContent) resolves.
+function resolvePostContext(target) {
   const link = target.closest?.("a[href*='/comments/']");
   if (isValidPostLink(link)) {
-    return link.href;
+    return { url: link.href, kind: "old", el: link.closest?.(".thing") || link };
   }
 
   const post = target.closest?.("shreddit-post");
@@ -73,14 +86,51 @@ function resolvePostUrl(target) {
       post.getAttribute("permalink") || post.getAttribute("content-href");
     if (permalink) {
       try {
-        return new URL(permalink, window.location.origin).href;
+        return { url: new URL(permalink, window.location.origin).href, kind: "new", el: post };
       } catch {
-        return "";
+        return null;
       }
     }
   }
 
-  return "";
+  return null;
+}
+
+// Best-effort scrape of whatever the new-Reddit feed already rendered for
+// this post. Attribute names on <shreddit-post> aren't publicly documented
+// and can change; every lookup here is defensive so a missing/renamed
+// attribute just degrades to a blanker quick-preview instead of throwing.
+function extractQuickDataNewReddit(post) {
+  const title = post.getAttribute("post-title") || "Untitled post";
+  const subredditName = post.getAttribute("subreddit-prefixed-name") ||
+    (post.getAttribute("subreddit-name") ? `r/${post.getAttribute("subreddit-name")}` : "r/unknown");
+  const author = post.getAttribute("author") || "unknown";
+  const score = post.getAttribute("score");
+  const commentCount = post.getAttribute("comment-count");
+
+  return {
+    title,
+    meta: `${subredditName} by u/${author}`,
+    score,
+    commentCount
+  };
+}
+
+function extractQuickDataOldReddit(el) {
+  const thing = el.closest?.(".thing") || el;
+  const title = thing.querySelector?.("a.title")?.textContent?.trim() || "Untitled post";
+  const author = thing.querySelector?.(".tagline a.author")?.textContent?.trim() || "unknown";
+  const subreddit = thing.querySelector?.(".tagline a.subreddit")?.textContent?.trim() || "r/unknown";
+  const scoreEl = thing.querySelector?.(".score.unvoted");
+  const score = scoreEl?.getAttribute("title") || scoreEl?.textContent?.trim() || "";
+  const commentCount = thing.querySelector?.("a.comments")?.textContent?.trim() || "";
+
+  return {
+    title,
+    meta: `${subreddit} by u/${author}`,
+    score,
+    commentCount
+  };
 }
 
 function onMouseOut(event) {
@@ -106,24 +156,55 @@ function setupPopupElement() {
   popup.id = "reddit-hover-popup";
   popup.classList.add("hidden");
   popup.innerHTML = `
+    <button type="button" class="rh-nav-prev hidden" aria-label="Previous">&#8249;</button>
+    <button type="button" class="rh-nav-next hidden" aria-label="Next">&#8250;</button>
     <h4 class="rh-title"></h4>
     <p class="rh-meta"></p>
-    <pre class="rh-body"></pre>
-    <div class="rh-comment-section">
-      <p class="rh-comment-label">Top comment</p>
-      <p class="rh-comment-author"></p>
-      <pre class="rh-comment-body"></pre>
+    <p class="rh-stats"></p>
+    <p class="rh-loading hidden">Loading post…</p>
+    <div class="rh-slides">
+      <div class="rh-slide-viewport">
+        <div class="rh-slide-text">
+          <pre class="rh-body hidden"></pre>
+          <div class="rh-comment-section hidden">
+            <p class="rh-comment-label">Top comment</p>
+            <p class="rh-comment-author"></p>
+            <p class="rh-comment-ups"></p>
+            <pre class="rh-comment-body"></pre>
+          </div>
+        </div>
+        <img class="rh-slide-image hidden" alt="" />
+      </div>
     </div>
+    <div class="rh-slide-dots hidden"></div>
   `;
 
   popup.addEventListener("mouseenter", () => {
     clearTimeout(hideTimer);
+    cursorOverPopup = true;
+
+    // Entering the popup is the real signal of intent to engage with this
+    // post, so this is where image bytes start downloading in the
+    // background — not on hover-start, which fires for every post the
+    // cursor merely passes over.
+    const fullData = fullContentCache.get(popup.dataset.postUrl);
+    if (fullData) {
+      maybePrefetchImages(fullData);
+    }
   });
 
   popup.addEventListener("mouseleave", () => {
+    cursorOverPopup = false;
     hideTimer = setTimeout(() => {
       hidePopup(false);
     }, HIDE_DELAY_MS);
+  });
+
+  popup.querySelector(".rh-nav-prev").addEventListener("click", () => {
+    navigateSlide(popup, -1);
+  });
+  popup.querySelector(".rh-nav-next").addEventListener("click", () => {
+    navigateSlide(popup, 1);
   });
 
   document.body.appendChild(popup);
@@ -148,8 +229,13 @@ function hidePopup(forceHide) {
   activePostUrl = "";
 }
 
-async function loadPreview(postUrl) {
-  const normalizedUrl = normalizePostUrl(postUrl);
+// Hover handler: renders instantly from data the feed page already has in
+// the DOM (title/meta/stats only — no media), then kicks off the one
+// network fetch that fills in the post's text body, top comment, and
+// image URLs. The preview always opens on the text slide; images only
+// appear once the user navigates the carousel to them.
+function showQuickPreview(context) {
+  const normalizedUrl = normalizePostUrl(context.url);
   if (!normalizedUrl) {
     return;
   }
@@ -157,17 +243,62 @@ async function loadPreview(postUrl) {
   if (activePostUrl === normalizedUrl) {
     return;
   }
-
   activePostUrl = normalizedUrl;
+  slideIndex = 0;
 
-  const cached = previewCache.get(normalizedUrl);
-  if (cached) {
-    renderPopup(cached);
+  const quickData = context.kind === "new"
+    ? extractQuickDataNewReddit(context.el)
+    : extractQuickDataOldReddit(context.el);
+
+  renderQuickPopup(normalizedUrl, quickData);
+
+  const cachedFull = fullContentCache.get(normalizedUrl);
+  if (cachedFull) {
+    renderFullContent(cachedFull);
+  } else {
+    void loadFullContent(normalizedUrl);
+  }
+}
+
+function renderQuickPopup(postUrl, quickData) {
+  const popup = getPopupElement();
+  if (!popup) {
     return;
   }
 
+  popup.dataset.postUrl = postUrl;
+
+  popup.querySelector(".rh-title").textContent = quickData.title;
+  popup.querySelector(".rh-meta").textContent = quickData.meta;
+  popup.querySelector(".rh-stats").textContent = [
+    quickData.score ? `${quickData.score} upvotes` : "",
+    quickData.commentCount ? `${quickData.commentCount} comments` : ""
+  ].filter(Boolean).join(" · ");
+
+  popup.querySelector(".rh-body").classList.add("hidden");
+  popup.querySelector(".rh-comment-section").classList.add("hidden");
+  popup.querySelector(".rh-slide-image").classList.add("hidden");
+  popup.querySelector(".rh-slide-text").classList.remove("hidden");
+  popup.querySelector(".rh-nav-prev").classList.add("hidden");
+  popup.querySelector(".rh-nav-next").classList.add("hidden");
+  popup.querySelector(".rh-slide-dots").classList.add("hidden");
+  popup.querySelector(".rh-loading").classList.remove("hidden");
+
+  popup.classList.remove("hidden");
+  popup.scrollTop = 0;
+}
+
+// Fetches the post's text body, top comment, and image URLs — the one
+// network request the whole preview needs, run automatically on hover.
+async function loadFullContent(postUrl) {
+  if (!postUrl) {
+    return;
+  }
+
+  const popup = getPopupElement();
+
   try {
-    const jsonUrl = buildJsonUrl(normalizedUrl);
+    const jsonUrl = buildJsonUrl(postUrl);
     const result = await chrome.runtime.sendMessage({
       type: "FETCH_PREVIEW_JSON",
       url: jsonUrl
@@ -186,70 +317,199 @@ async function loadPreview(postUrl) {
       (c) => c.kind === "t1" && c.data?.body
     )?.data;
 
-    const previewData = {
-      title: postData.title || "Untitled post",
+    const fullData = {
+      postUrl,
+      // Authoritative title/meta/stats from the fetch itself — used to
+      // correct the quick DOM-scraped placeholder once this resolves,
+      // since that scrape can come up empty if Reddit's feed markup
+      // doesn't match the selectors/attributes we guessed.
+      title: postData.title || "",
       meta: `r/${postData.subreddit || "unknown"} by u/${postData.author || "unknown"}`,
+      score: typeof postData.score === "number" ? String(postData.score) : "",
+      commentCount: typeof postData.num_comments === "number" ? String(postData.num_comments) : "",
       body:
         postData.selftext?.trim() ||
-        (postData.is_self ? "(No body text)" : "(Link post: no text preview available.)"),
+        (postData.is_self ? "" : "(Link post: no text preview available.)"),
+      images: extractImages(postData),
       topCommentAuthor: topCommentData ? `u/${topCommentData.author}` : "",
-      topCommentBody: topCommentData?.body?.trim() || ""
+      topCommentBody: topCommentData?.body?.trim() || "",
+      topCommentUps: topCommentData && typeof topCommentData.ups === "number" ? topCommentData.ups : null,
+      prefetched: false
     };
 
-    // Keep a small cache to avoid repeated network calls while browsing.
-    if (previewCache.size > 60) {
-      const oldestKey = previewCache.keys().next().value;
-      previewCache.delete(oldestKey);
+    if (fullContentCache.size > 60) {
+      const oldestKey = fullContentCache.keys().next().value;
+      fullContentCache.delete(oldestKey);
     }
-    previewCache.set(normalizedUrl, previewData);
+    fullContentCache.set(postUrl, fullData);
 
-    if (activePostUrl === normalizedUrl) {
-      renderPopup(previewData);
+    // The user may have already moved into the popup while this fetch was
+    // in flight — in that case start the image prefetch immediately
+    // instead of waiting for another mouseenter that won't come.
+    if (cursorOverPopup && popup?.dataset.postUrl === postUrl) {
+      maybePrefetchImages(fullData);
+    }
+
+    if (popup?.dataset.postUrl === postUrl) {
+      renderFullContent(fullData);
     }
   } catch (error) {
-    if (activePostUrl === normalizedUrl) {
-      renderPopup({
-        title: "Preview unavailable",
-        meta: "",
-        body: "Could not load this post preview right now."
-      });
+    if (popup?.dataset.postUrl === postUrl) {
+      popup.querySelector(".rh-loading").classList.add("hidden");
+      const bodyEl = popup.querySelector(".rh-body");
+      bodyEl.textContent = "Could not load this post right now.";
+      bodyEl.classList.remove("hidden");
     }
     console.error("[Reddit Hover Preview]", error);
   }
 }
 
-function renderPopup(previewData) {
+// Starts warming the browser's image cache, at most once per post — called
+// once the cursor actually enters the popup (real engagement), not on
+// hover-start, so posts the user merely glances past never trigger a
+// download. By the time the carousel is clicked to an image, it's
+// typically already loading or loaded, since reading the text first takes
+// at least as long.
+function maybePrefetchImages(fullData) {
+  if (fullData.prefetched || !fullData.images.length) {
+    return;
+  }
+
+  fullData.prefetched = true;
+  prefetchImages(fullData.images);
+}
+
+function prefetchImages(urls) {
+  prefetchImage(urls[0], "high");
+  if (urls.length > 1) {
+    setTimeout(() => {
+      urls.slice(1).forEach((url) => prefetchImage(url, "low"));
+    }, 0);
+  }
+}
+
+function prefetchImage(url, priority) {
+  const img = new Image();
+  img.decoding = "async";
+  if ("fetchPriority" in img) {
+    img.fetchPriority = priority;
+  }
+  img.src = url;
+}
+
+// Extracts every image for the post: the full gallery when it's a gallery
+// post, otherwise the single image/link-preview image, if any.
+function extractImages(postData) {
+  const decode = (url) => (typeof url === "string" ? url.replace(/&amp;/g, "&") : "");
+
+  if (postData.is_gallery && postData.gallery_data?.items?.length && postData.media_metadata) {
+    const images = postData.gallery_data.items
+      .map((item) => postData.media_metadata?.[item.media_id])
+      .filter((meta) => meta?.s?.u || meta?.s?.gif)
+      .map((meta) => decode(meta.s.u || meta.s.gif));
+    if (images.length) {
+      return images;
+    }
+  }
+
+  if (postData.post_hint === "image" && postData.url_overridden_by_dest) {
+    return [decode(postData.url_overridden_by_dest)];
+  }
+
+  const previewImage = postData.preview?.images?.[0]?.source?.url;
+  if (previewImage) {
+    return [decode(previewImage)];
+  }
+
+  return [];
+}
+
+function renderFullContent(fullData) {
   const popup = getPopupElement();
-  if (!popup) {
+  if (!popup || popup.dataset.postUrl !== fullData.postUrl) {
     return;
   }
 
-  const titleEl = popup.querySelector(".rh-title");
-  const metaEl = popup.querySelector(".rh-meta");
-  const bodyEl = popup.querySelector(".rh-body");
-  const commentSection = popup.querySelector(".rh-comment-section");
-  const commentAuthorEl = popup.querySelector(".rh-comment-author");
-  const commentBodyEl = popup.querySelector(".rh-comment-body");
-  if (!titleEl || !metaEl || !bodyEl) {
+  popup.querySelector(".rh-loading").classList.add("hidden");
+
+  // Correct the quick DOM-scraped placeholder with the real data, in case
+  // that scrape came up empty (e.g. "Untitled post" / "r/unknown").
+  if (fullData.title) {
+    popup.querySelector(".rh-title").textContent = fullData.title;
+  }
+  popup.querySelector(".rh-meta").textContent = fullData.meta;
+  popup.querySelector(".rh-stats").textContent = [
+    fullData.score ? `${fullData.score} upvotes` : "",
+    fullData.commentCount ? `${fullData.commentCount} comments` : ""
+  ].filter(Boolean).join(" · ");
+
+  const hasImages = fullData.images.length > 0;
+  popup.querySelector(".rh-nav-prev").classList.toggle("hidden", !hasImages);
+  popup.querySelector(".rh-nav-next").classList.toggle("hidden", !hasImages);
+  popup.querySelector(".rh-slide-dots").classList.toggle("hidden", !hasImages);
+
+  showSlide(popup, fullData, slideIndex);
+}
+
+function navigateSlide(popup, delta) {
+  const fullData = fullContentCache.get(popup.dataset.postUrl);
+  if (!fullData || !fullData.images.length) {
     return;
   }
 
-  titleEl.textContent = previewData.title;
-  metaEl.textContent = previewData.meta;
-  bodyEl.textContent = previewData.body;
+  showSlide(popup, fullData, slideIndex + delta);
+}
 
-  if (commentSection && commentAuthorEl && commentBodyEl) {
-    if (previewData.topCommentBody) {
-      commentAuthorEl.textContent = previewData.topCommentAuthor;
-      commentBodyEl.textContent = previewData.topCommentBody;
+// Renders one slide of the text/images sequence: slide 0 is always the
+// text body + top comment, slides 1..N are images[0..N-1]. Navigation
+// wraps around in both directions — clicking past the last image lands
+// back on the text slide, and clicking "previous" from the text slide
+// lands on the last image.
+function showSlide(popup, fullData, requestedIndex) {
+  const totalSlides = fullData.images.length + 1;
+  slideIndex = ((requestedIndex % totalSlides) + totalSlides) % totalSlides;
+
+  const textEl = popup.querySelector(".rh-slide-text");
+  const imageEl = popup.querySelector(".rh-slide-image");
+
+  if (slideIndex === 0) {
+    imageEl.classList.add("hidden");
+    imageEl.removeAttribute("src");
+    textEl.classList.remove("hidden");
+
+    const bodyEl = popup.querySelector(".rh-body");
+    if (fullData.body) {
+      bodyEl.textContent = fullData.body;
+      bodyEl.classList.remove("hidden");
+    } else {
+      bodyEl.classList.add("hidden");
+    }
+
+    const commentSection = popup.querySelector(".rh-comment-section");
+    if (fullData.topCommentBody) {
+      popup.querySelector(".rh-comment-author").textContent = fullData.topCommentAuthor;
+      popup.querySelector(".rh-comment-ups").textContent =
+        fullData.topCommentUps != null ? `${fullData.topCommentUps} upvotes` : "";
+      popup.querySelector(".rh-comment-body").textContent = fullData.topCommentBody;
       commentSection.classList.remove("hidden");
     } else {
       commentSection.classList.add("hidden");
     }
+  } else {
+    textEl.classList.add("hidden");
+    imageEl.src = fullData.images[slideIndex - 1];
+    imageEl.classList.remove("hidden");
   }
 
-  popup.classList.remove("hidden");
-  popup.scrollTop = 0;
+  updateDots(popup, totalSlides);
+}
+
+function updateDots(popup, totalSlides) {
+  const dotsEl = popup.querySelector(".rh-slide-dots");
+  dotsEl.innerHTML = Array.from(
+    { length: totalSlides },
+    (_, i) => `<span class="rh-dot${i === slideIndex ? " active" : ""}"></span>`
+  ).join("");
 }
 
 function isValidPostLink(link) {
@@ -277,6 +537,10 @@ function normalizePostUrl(rawUrl) {
   }
 }
 
+// limit=1&depth=1 asks Reddit for just the single top-level top comment
+// instead of its default (much larger) comment tree, since that's all we
+// ever read from the response — cuts payload size and parse time
+// noticeably on posts with hundreds of comments.
 function buildJsonUrl(normalizedUrl) {
-  return `${normalizedUrl}.json?raw_json=1`;
+  return `${normalizedUrl}.json?raw_json=1&limit=1&depth=1`;
 }
