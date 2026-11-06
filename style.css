@@ -24,13 +24,13 @@
 
 #reddit-hover-popup {
   position: fixed;
-  /* Default/fallback spot — content.js's positionPopup() repositions this
-     (left/top/max-height) next to whichever post is actually hovered, so
-     the popup never sits far from the cursor. These values only apply
-     for the instant before that first runs. */
   right: 20px;
   top: 120px;
   width: min(420px, calc(100vw - 30px));
+  /* Fill down to near the bottom of the actual browser viewport instead of
+     a flat vh fraction, which either wastes space on tall windows or — on
+     short ones — can push past the bottom edge with no way to reach it,
+     since a fixed element doesn't scroll with the page. */
   max-height: calc(100vh - 120px - 20px);
   overflow-y: auto;
   /* Without this, scrolling with the cursor over the popup falls through
