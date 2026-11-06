@@ -24,10 +24,6 @@
 
 #reddit-hover-popup {
   position: fixed;
-  /* Overrides the popover default UA stylesheet's `margin: auto`, which
-     would otherwise fight with the explicit top/left/bottom offsets
-     content.js sets on every show. */
-  margin: 0;
   /* Default/fallback spot — content.js's positionPopup() repositions this
      (left/top/max-height) next to whichever post is actually hovered, so
      the popup never sits far from the cursor. These values only apply
