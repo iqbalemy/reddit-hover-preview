@@ -1,4 +1,10 @@
 const SETTINGS_KEY = "hoverPreviewEnabled";
+// Opens the popup once the cursor has been still (no mousemove) over a
+// post for this long. Idle-based rather than a fixed dwell-since-entry,
+// so a cursor sweeping across a feed (or moving around within one large
+// card, which may not re-fire mouseover at all) never opens the popup —
+// only an actual pause does. Scheduled from the mousemove listener, not
+// onMouseOver — see init().
 const HOVER_DELAY_MS = 450;
 // Must stay below HOVER_DELAY_MS, or quickly moving the cursor from one
 // post to the next post's own hover delay can overlap awkwardly with
@@ -10,9 +16,7 @@ const HIDE_DELAY_MS = 350;
 // over a post for this long — well before HOVER_DELAY_MS, when the popup
 // itself appears — so the data is often already back by the time the
 // popup opens instead of showing "Loading post…" for the full round-trip.
-// Idle-based rather than a fixed dwell-since-entry so a cursor merely
-// sweeping across many posts (or moving around within one large card)
-// doesn't fire a fetch per post it crosses. See ensurePrefetched().
+// Same idle-based scheduling as HOVER_DELAY_MS above. See ensurePrefetched().
 const PREFETCH_DELAY_MS = 150;
 // Forgives a cursor that overshoots the popup's edge by this many CSS
 // pixels (e.g. aiming for its scrollbar, or the gap between the nav
@@ -56,9 +60,11 @@ let hideTimer = null;
 let activePostUrl = "";
 // The post currently under the cursor, kept up to date by onMouseOver/
 // onMouseOut, and read by the mousemove listener below to (re)schedule
-// the prefetch each time the cursor moves — see PREFETCH_DELAY_MS.
+// the prefetch and popup each time the cursor moves — see
+// PREFETCH_DELAY_MS/HOVER_DELAY_MS.
 let currentHoverUrl = "";
 let currentHoverIsCardView = false;
+let currentHoverContext = null;
 // The postUrl of the single JSON request currently in flight (at most
 // one at a time — see loadFullContent()), or "" when none is.
 let fetchUrl = "";
@@ -106,19 +112,28 @@ function init() {
       lastMouseX = event.clientX;
       lastMouseY = event.clientY;
 
-      // Idle-based prefetch: every movement pushes the fetch back out,
-      // so it only actually fires once the cursor has stopped over the
-      // same post for PREFETCH_DELAY_MS. currentHoverUrl is kept current
-      // by onMouseOver/onMouseOut.
+      // Idle-based prefetch *and* popup: every movement pushes both back
+      // out, so they only actually fire once the cursor has stopped over
+      // the same post — a dwell-since-entering-the-element timer (the
+      // previous approach) still fires mid-sweep for any row/card tall
+      // enough that crossing it takes longer than the delay, since no new
+      // mouseover happens while the cursor stays on the same element.
+      // currentHoverContext/Url/IsCardView are kept current by
+      // onMouseOver/onMouseOut.
       clearTimeout(prefetchTimer);
+      clearTimeout(hoverTimer);
       if (!currentHoverUrl) {
         return;
       }
       const url = currentHoverUrl;
       const isCardView = currentHoverIsCardView;
+      const context = currentHoverContext;
       prefetchTimer = setTimeout(() => {
         ensurePrefetched(url, isCardView);
       }, PREFETCH_DELAY_MS);
+      hoverTimer = setTimeout(() => {
+        showQuickPreview(context);
+      }, HOVER_DELAY_MS);
     },
     { passive: true }
   );
@@ -157,16 +172,12 @@ function onMouseOver(event) {
   }
 
   clearTimeout(hideTimer);
-  clearTimeout(hoverTimer);
 
-  // Prefetch scheduling itself happens in the mousemove listener (idle-
-  // based); this just keeps the post it should prefetch current.
+  // Prefetch and popup scheduling both happen in the mousemove listener
+  // (idle-based); this just keeps the post they should act on current.
   currentHoverUrl = normalizedUrl;
   currentHoverIsCardView = isCardViewPost(context);
-
-  hoverTimer = setTimeout(() => {
-    showQuickPreview(context);
-  }, HOVER_DELAY_MS);
+  currentHoverContext = context;
 }
 
 // Resolves the Reddit post URL *and* the DOM node that already holds that
@@ -275,6 +286,7 @@ function onMouseOut(event) {
   clearTimeout(hoverTimer);
   clearTimeout(prefetchTimer);
   currentHoverUrl = "";
+  currentHoverContext = null;
 
   const related = event.relatedTarget;
   const popup = getPopupElement();
