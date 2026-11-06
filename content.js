@@ -299,16 +299,39 @@ function positionPopup(el) {
   }
   left = Math.max(margin, left);
 
-  // Vertically align with the post, clamped so the popup always stays
-  // fully on-screen (and leaves enough room to actually show something)
-  // regardless of where in the feed the post sits.
+  // Vertically, anchor the popup to whichever part of the post lines up
+  // with where that post sits in the viewport: a post near the top keeps
+  // the popup's top edge level with the post's top, a post near the
+  // bottom keeps the popup's bottom edge level with the post's bottom,
+  // and a post in the middle keeps the popup centered on it. Anchoring
+  // to the nearer edge (rather than always the top) is what keeps a
+  // popup for a bottom-of-viewport post from being pushed up the screen
+  // and away from the cursor.
   const minVisibleHeight = 160;
-  const top = Math.max(margin, Math.min(rect.top, vh - margin - minVisibleHeight));
-  const maxHeight = vh - top - margin;
+  const postCenterY = rect.top + rect.height / 2;
+  const zone = postCenterY < vh / 3 ? "top" : postCenterY < (vh * 2) / 3 ? "middle" : "bottom";
+
+  let top;
+  let bottom = "auto";
+  let maxHeight;
+
+  if (zone === "top") {
+    top = Math.max(margin, Math.min(rect.top, vh - margin - minVisibleHeight));
+    maxHeight = vh - top - margin;
+  } else if (zone === "bottom") {
+    const bottomEdge = Math.min(vh - margin, Math.max(rect.bottom, margin + minVisibleHeight));
+    maxHeight = bottomEdge - margin;
+    top = "auto";
+    bottom = `${vh - bottomEdge}px`;
+  } else {
+    maxHeight = Math.min(vh - margin * 2, 520);
+    top = Math.max(margin, Math.min(postCenterY - maxHeight / 2, vh - margin - maxHeight));
+  }
 
   popup.style.left = `${left}px`;
   popup.style.right = "auto";
-  popup.style.top = `${top}px`;
+  popup.style.bottom = bottom;
+  popup.style.top = top === "auto" ? "auto" : `${top}px`;
   popup.style.maxHeight = `${maxHeight}px`;
 }
 
