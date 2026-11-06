@@ -247,6 +247,10 @@ function setupPopupElement() {
           </div>
         </div>
         <img class="rh-slide-image hidden" alt="" />
+        <div class="rh-slide-gate hidden">
+          <p class="rh-gate-remark"></p>
+          <button type="button" class="rh-gate-button">Show content</button>
+        </div>
       </div>
     </div>
     <div class="rh-slide-dots hidden"></div>
@@ -278,6 +282,18 @@ function setupPopupElement() {
   });
   popup.querySelector(".rh-nav-next").addEventListener("click", () => {
     navigateSlide(popup, 1);
+  });
+
+  // "Show content" is a one-way reveal per post — sticks on fullData
+  // itself (not some popup-local flag) so it stays revealed if the user
+  // navigates the carousel away and back, or re-hovers the same post.
+  popup.querySelector(".rh-gate-button").addEventListener("click", () => {
+    const fullData = fullContentCache.get(popup.dataset.postUrl);
+    if (!fullData) {
+      return;
+    }
+    fullData.revealed = true;
+    showSlide(popup, fullData, slideIndex);
   });
 
   document.body.appendChild(popup);
@@ -501,6 +517,10 @@ async function loadFullContent(postUrl, isCardView) {
       // there's nothing for our own carousel to add — skip the work and
       // the image fetch/prefetch entirely rather than just hiding the UI.
       images: isCardView ? [] : extractImages(postData),
+      // Set only when the image(s) above should be shown behind a "Show
+      // content" button rather than directly — see getContentGateRemark().
+      gateRemark: isCardView ? null : getContentGateRemark(postData),
+      revealed: false,
       topCommentAuthor: topCommentData ? `u/${topCommentData.author}` : "",
       topCommentBody: topCommentData?.body?.trim() || "",
       topCommentUps: topCommentData && typeof topCommentData.ups === "number" ? topCommentData.ups : null,
@@ -594,7 +614,34 @@ function extractImages(postData) {
     return [decode(previewImage)];
   }
 
+  // Last resort: Reddit's own feed thumbnail. It's a real image URL for
+  // plenty of posts that don't match any case above — including many
+  // "self"/video/multi_media posts — except for a handful of literal
+  // sentinel strings ("self", "default", "nsfw", "spoiler", "image", "")
+  // Reddit uses in its place; getContentGateRemark() is what reacts to
+  // those by gating the result behind a "Show content" button.
+  if (typeof postData.thumbnail === "string" && /^https?:\/\//i.test(postData.thumbnail)) {
+    return [decode(postData.thumbnail)];
+  }
+
   return [];
+}
+
+// Reddit substitutes one of a handful of literal strings for `thumbnail`
+// instead of a URL in these cases. The underlying image is often still
+// reachable through extractImages()'s other fallbacks (e.g. preview.images
+// for an nsfw/spoiler post), so rather than hide it entirely, gate it
+// behind a "Show content" button with a remark explaining why Reddit
+// itself didn't surface a thumbnail here.
+const THUMBNAIL_GATE_REMARKS = {
+  nsfw: "Hidden because this post is marked NSFW.",
+  spoiler: "Hidden to avoid spoiling this post.",
+  default: "Reddit didn't generate a thumbnail for this post.",
+  self: "This image comes from the post's text, not a thumbnail."
+};
+
+function getContentGateRemark(postData) {
+  return THUMBNAIL_GATE_REMARKS[postData.thumbnail] || null;
 }
 
 function renderFullContent(fullData) {
@@ -644,10 +691,13 @@ function showSlide(popup, fullData, requestedIndex) {
 
   const textEl = popup.querySelector(".rh-slide-text");
   const imageEl = popup.querySelector(".rh-slide-image");
+  const gateEl = popup.querySelector(".rh-slide-gate");
 
   if (slideIndex === 0) {
     imageEl.classList.add("hidden");
+    imageEl.classList.remove("gated");
     imageEl.removeAttribute("src");
+    gateEl.classList.add("hidden");
     textEl.classList.remove("hidden");
 
     const bodyEl = popup.querySelector(".rh-body");
@@ -672,6 +722,15 @@ function showSlide(popup, fullData, requestedIndex) {
     textEl.classList.add("hidden");
     imageEl.src = fullData.images[slideIndex - 1];
     imageEl.classList.remove("hidden");
+
+    const isGated = Boolean(fullData.gateRemark) && !fullData.revealed;
+    imageEl.classList.toggle("gated", isGated);
+    if (isGated) {
+      popup.querySelector(".rh-gate-remark").textContent = fullData.gateRemark;
+      gateEl.classList.remove("hidden");
+    } else {
+      gateEl.classList.add("hidden");
+    }
   }
 
   updateDots(popup, totalSlides);

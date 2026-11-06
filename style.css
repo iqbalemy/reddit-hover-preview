@@ -177,6 +177,58 @@
   border-radius: 8px;
 }
 
+/* Holds the image and its gate overlay in the same positioning context,
+   so the overlay's position: absolute below is relative to the image
+   area specifically, not the whole popup. */
+#reddit-hover-popup .rh-slide-viewport {
+  position: relative;
+}
+
+/* Blurs a gated image (nsfw/spoiler/no-real-thumbnail) rather than
+   hiding it outright — "Show content" sits on top of it via rh-slide-gate
+   below, same idea as Reddit's own spoiler/nsfw treatment. */
+#reddit-hover-popup .rh-slide-image.gated {
+  filter: blur(24px);
+}
+
+#reddit-hover-popup .rh-slide-gate {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+}
+
+#reddit-hover-popup .rh-gate-remark {
+  margin: 0;
+  max-width: 85%;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+#reddit-hover-popup .rh-gate-button {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 999px;
+  background: rgb(83, 104, 235);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#reddit-hover-popup .rh-gate-button:hover {
+  background: rgb(66, 86, 214);
+}
+
 #reddit-hover-popup .rh-slide-dots {
   margin-top: 8px;
   display: flex;
