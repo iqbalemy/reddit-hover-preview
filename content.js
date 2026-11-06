@@ -392,7 +392,14 @@ function renderQuickPopup(postUrl, quickData) {
 
   popup.querySelector(".rh-body").classList.add("hidden");
   popup.querySelector(".rh-comment-section").classList.add("hidden");
-  popup.querySelector(".rh-slide-image").classList.add("hidden");
+  const imageEl = popup.querySelector(".rh-slide-image");
+  imageEl.classList.add("hidden");
+  imageEl.classList.remove("gated");
+  // Otherwise a gated image's "Show content" overlay from whatever post
+  // was shown previously stays visible, floating on top of this new
+  // post's text slide, since nothing else here resets it before
+  // showSlide() runs again.
+  popup.querySelector(".rh-slide-gate").classList.add("hidden");
   popup.querySelector(".rh-slide-text").classList.remove("hidden");
   popup.querySelector(".rh-nav-prev").classList.add("hidden");
   popup.querySelector(".rh-nav-next").classList.add("hidden");

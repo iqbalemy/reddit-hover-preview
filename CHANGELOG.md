@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file.
 
+## [2.1] - 2026-11-06
+
+### Changed
+- **Top comment is now the highest-upvoted one, not just the first.** Bot comments (AutoModerator, any `*bot`-suffixed username, or a comment carrying Reddit's standard "I am a bot, and this action was performed automatically" disclaimer) are filtered out before picking the top one; if every top-level comment is a bot's, no comment section is shown at all.
+- **Card view no longer shows the image carousel or fetches images.** New Reddit's `<shreddit-post view-type="cardView">` already shows the post's media inline in the feed, so the carousel was redundant there — compact view (where the thumbnail is too small to read) keeps it as before.
+- The popup no longer appears when hovering a post while already on that post's own page (e.g. its comments opened in this tab).
+- The popup now fades out (500ms) instead of vanishing instantly when hidden.
+- A cursor that overshoots the popup's edge by a little (e.g. aiming for the scrollbar) no longer dismisses it — a small forgiveness buffer defers the hide and re-checks instead.
+
+### Performance
+- The post data fetch now starts ~300ms before the popup itself opens (still well after a mere hover-past), instead of starting only once the popup is about to show — the loading state rarely appears anymore.
+- Only one JSON request is kept in flight at a time; hovering onward to a different post before the previous one resolves now cancels it (via a real `AbortController` in the background worker) instead of letting a response nobody needs anymore finish downloading.
+
+### Fixed
+- Posts whose only available image is gated behind Reddit's own placeholder thumbnail values (`nsfw`, `spoiler`, `default`, `self`) now still show that image in the carousel, behind a blurred "Show content" button with a remark explaining why Reddit didn't surface a plain thumbnail — previously these posts silently showed no carousel at all.
+- Card/compact view detection no longer depends on exactly where over a post's card the cursor enters. New Reddit's cards have several real `<a href="/comments/...">` elements (the full-card overlay link, the title link, the comments-count button) sitting outside the `<shreddit-post>`'s shadow root; landing on one of those used to be misread as old-Reddit-style, silently breaking the view-type check for most of a card's hoverable area.
+- `extractImages()` also falls back to the feed thumbnail URL when nothing else matches, catching more video/multi-media/self posts that previously showed no media at all.
+- Carousel nav arrows and the "Show content" button no longer render their text/glyph visibly off-center (they relied on `line-height`/`text-align` centering with no font override, instead of flex centering with the popup's own font).
+
 ## [2.0] - 2026-11-05
 
 ### Fixed
