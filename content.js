@@ -6,11 +6,13 @@ const HOVER_DELAY_MS = 450;
 // duration (see #reddit-hover-popup.hidden in style.css) — that's a
 // separate, purely visual timing with no such constraint.
 const HIDE_DELAY_MS = 350;
-// Starts the network fetch this far into a hover — well before
-// HOVER_DELAY_MS, when the popup itself appears — so the data is often
-// already back by the time the popup opens instead of showing "Loading
-// post…" for the full round-trip. Still long enough to skip posts the
-// cursor merely passes over. See ensurePrefetched().
+// Starts the network fetch once the cursor has been still (no mousemove)
+// over a post for this long — well before HOVER_DELAY_MS, when the popup
+// itself appears — so the data is often already back by the time the
+// popup opens instead of showing "Loading post…" for the full round-trip.
+// Idle-based rather than a fixed dwell-since-entry so a cursor merely
+// sweeping across many posts (or moving around within one large card)
+// doesn't fire a fetch per post it crosses. See ensurePrefetched().
 const PREFETCH_DELAY_MS = 150;
 // Forgives a cursor that overshoots the popup's edge by this many CSS
 // pixels (e.g. aiming for its scrollbar, or the gap between the nav
@@ -52,6 +54,11 @@ let hoverTimer = null;
 let prefetchTimer = null;
 let hideTimer = null;
 let activePostUrl = "";
+// The post currently under the cursor, kept up to date by onMouseOver/
+// onMouseOut, and read by the mousemove listener below to (re)schedule
+// the prefetch each time the cursor moves — see PREFETCH_DELAY_MS.
+let currentHoverUrl = "";
+let currentHoverIsCardView = false;
 // The postUrl of the single JSON request currently in flight (at most
 // one at a time — see loadFullContent()), or "" when none is.
 let fetchUrl = "";
@@ -98,6 +105,20 @@ function init() {
     (event) => {
       lastMouseX = event.clientX;
       lastMouseY = event.clientY;
+
+      // Idle-based prefetch: every movement pushes the fetch back out,
+      // so it only actually fires once the cursor has stopped over the
+      // same post for PREFETCH_DELAY_MS. currentHoverUrl is kept current
+      // by onMouseOver/onMouseOut.
+      clearTimeout(prefetchTimer);
+      if (!currentHoverUrl) {
+        return;
+      }
+      const url = currentHoverUrl;
+      const isCardView = currentHoverIsCardView;
+      prefetchTimer = setTimeout(() => {
+        ensurePrefetched(url, isCardView);
+      }, PREFETCH_DELAY_MS);
     },
     { passive: true }
   );
@@ -128,12 +149,11 @@ function onMouseOver(event) {
 
   clearTimeout(hideTimer);
   clearTimeout(hoverTimer);
-  clearTimeout(prefetchTimer);
 
-  const isCardView = isCardViewPost(context);
-  prefetchTimer = setTimeout(() => {
-    ensurePrefetched(normalizedUrl, isCardView);
-  }, PREFETCH_DELAY_MS);
+  // Prefetch scheduling itself happens in the mousemove listener (idle-
+  // based); this just keeps the post it should prefetch current.
+  currentHoverUrl = normalizedUrl;
+  currentHoverIsCardView = isCardViewPost(context);
 
   hoverTimer = setTimeout(() => {
     showQuickPreview(context);
@@ -245,6 +265,7 @@ function extractQuickDataOldReddit(el) {
 function onMouseOut(event) {
   clearTimeout(hoverTimer);
   clearTimeout(prefetchTimer);
+  currentHoverUrl = "";
 
   const related = event.relatedTarget;
   const popup = getPopupElement();
