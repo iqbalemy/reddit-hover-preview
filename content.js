@@ -1,6 +1,6 @@
 const SETTINGS_KEY = "hoverPreviewEnabled";
 const HOVER_DELAY_MS = 450;
-const HIDE_DELAY_MS = 500;
+const HIDE_DELAY_MS = 350;
 // Post text/comment/image-URL data, fetched once per post on hover and
 // cached here so re-hovering doesn't re-fetch.
 const fullContentCache = new Map();
