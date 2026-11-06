@@ -1,4 +1,10 @@
 const SETTINGS_KEY = "hoverPreviewEnabled";
+// Opens the popup once the cursor has been still (no mousemove) over a
+// post for this long. Idle-based rather than a fixed dwell-since-entry,
+// so a cursor sweeping across a feed (or moving around within one large
+// card, which may not re-fire mouseover at all) never opens the popup —
+// only an actual pause does. Scheduled from the mousemove listener, not
+// onMouseOver — see init().
 const HOVER_DELAY_MS = 450;
 // Must stay below HOVER_DELAY_MS, or quickly moving the cursor from one
 // post to the next post's own hover delay can overlap awkwardly with
@@ -6,11 +12,11 @@ const HOVER_DELAY_MS = 450;
 // duration (see #reddit-hover-popup.hidden in style.css) — that's a
 // separate, purely visual timing with no such constraint.
 const HIDE_DELAY_MS = 350;
-// Starts the network fetch this far into a hover — well before
-// HOVER_DELAY_MS, when the popup itself appears — so the data is often
-// already back by the time the popup opens instead of showing "Loading
-// post…" for the full round-trip. Still long enough to skip posts the
-// cursor merely passes over. See ensurePrefetched().
+// Starts the network fetch once the cursor has been still (no mousemove)
+// over a post for this long — well before HOVER_DELAY_MS, when the popup
+// itself appears — so the data is often already back by the time the
+// popup opens instead of showing "Loading post…" for the full round-trip.
+// Same idle-based scheduling as HOVER_DELAY_MS above. See ensurePrefetched().
 const PREFETCH_DELAY_MS = 150;
 // Forgives a cursor that overshoots the popup's edge by this many CSS
 // pixels (e.g. aiming for its scrollbar, or the gap between the nav
@@ -52,6 +58,13 @@ let hoverTimer = null;
 let prefetchTimer = null;
 let hideTimer = null;
 let activePostUrl = "";
+// The post currently under the cursor, kept up to date by onMouseOver/
+// onMouseOut, and read by the mousemove listener below to (re)schedule
+// the prefetch and popup each time the cursor moves — see
+// PREFETCH_DELAY_MS/HOVER_DELAY_MS.
+let currentHoverUrl = "";
+let currentHoverIsCardView = false;
+let currentHoverContext = null;
 // The postUrl of the single JSON request currently in flight (at most
 // one at a time — see loadFullContent()), or "" when none is.
 let fetchUrl = "";
@@ -98,6 +111,29 @@ function init() {
     (event) => {
       lastMouseX = event.clientX;
       lastMouseY = event.clientY;
+
+      // Idle-based prefetch *and* popup: every movement pushes both back
+      // out, so they only actually fire once the cursor has stopped over
+      // the same post — a dwell-since-entering-the-element timer (the
+      // previous approach) still fires mid-sweep for any row/card tall
+      // enough that crossing it takes longer than the delay, since no new
+      // mouseover happens while the cursor stays on the same element.
+      // currentHoverContext/Url/IsCardView are kept current by
+      // onMouseOver/onMouseOut.
+      clearTimeout(prefetchTimer);
+      clearTimeout(hoverTimer);
+      if (!currentHoverUrl) {
+        return;
+      }
+      const url = currentHoverUrl;
+      const isCardView = currentHoverIsCardView;
+      const context = currentHoverContext;
+      prefetchTimer = setTimeout(() => {
+        ensurePrefetched(url, isCardView);
+      }, PREFETCH_DELAY_MS);
+      hoverTimer = setTimeout(() => {
+        showQuickPreview(context);
+      }, HOVER_DELAY_MS);
     },
     { passive: true }
   );
@@ -108,8 +144,17 @@ function init() {
   });
 }
 
+// True once the extension is reloaded/updated (dev-mode reload, or an
+// auto-update) while this tab's content script is still running — Chrome
+// tears down chrome.runtime in that orphaned context, so every call into
+// it throws. Nothing short of reloading the page fixes that, so callers
+// use this to fail quietly instead of surfacing a raw TypeError.
+function isExtensionContextValid() {
+  return typeof chrome !== "undefined" && !!chrome.runtime && !!chrome.runtime.id;
+}
+
 function onMouseOver(event) {
-  if (!enabled) {
+  if (!enabled || !isExtensionContextValid()) {
     return;
   }
 
@@ -127,17 +172,12 @@ function onMouseOver(event) {
   }
 
   clearTimeout(hideTimer);
-  clearTimeout(hoverTimer);
-  clearTimeout(prefetchTimer);
 
-  const isCardView = isCardViewPost(context);
-  prefetchTimer = setTimeout(() => {
-    ensurePrefetched(normalizedUrl, isCardView);
-  }, PREFETCH_DELAY_MS);
-
-  hoverTimer = setTimeout(() => {
-    showQuickPreview(context);
-  }, HOVER_DELAY_MS);
+  // Prefetch and popup scheduling both happen in the mousemove listener
+  // (idle-based); this just keeps the post they should act on current.
+  currentHoverUrl = normalizedUrl;
+  currentHoverIsCardView = isCardViewPost(context);
+  currentHoverContext = context;
 }
 
 // Resolves the Reddit post URL *and* the DOM node that already holds that
@@ -245,6 +285,8 @@ function extractQuickDataOldReddit(el) {
 function onMouseOut(event) {
   clearTimeout(hoverTimer);
   clearTimeout(prefetchTimer);
+  currentHoverUrl = "";
+  currentHoverContext = null;
 
   const related = event.relatedTarget;
   const popup = getPopupElement();
@@ -519,6 +561,10 @@ function ensurePrefetched(postUrl, isCardView) {
 // images entirely — see isCardViewPost() for why.
 async function loadFullContent(postUrl, isCardView) {
   if (!postUrl || fetchUrl === postUrl) {
+    return;
+  }
+
+  if (!isExtensionContextValid()) {
     return;
   }
 
