@@ -167,7 +167,7 @@ function setupPopupElement() {
         <div class="rh-slide-text">
           <pre class="rh-body hidden"></pre>
           <div class="rh-comment-section hidden">
-            <p class="rh-comment-label">Top comment</p>
+            <p class="rh-comment-label">Top voted comment</p>
             <p class="rh-comment-author"></p>
             <p class="rh-comment-ups"></p>
             <pre class="rh-comment-body"></pre>
@@ -288,6 +288,29 @@ function renderQuickPopup(postUrl, quickData) {
   popup.scrollTop = 0;
 }
 
+// Bot accounts (AutoModerator and friends) almost always post the first
+// top-level comment, which isn't what people want to see as the "top"
+// one — filter those out before picking the most-upvoted comment.
+function isBotComment(comment) {
+  const author = (comment?.author || "").toLowerCase();
+  return author === "automoderator" || author.endsWith("bot");
+}
+
+// Picks the highest-upvoted top-level comment, ignoring bot comments.
+// Returns undefined if there are no non-bot comments (e.g. the only
+// comment is AutoModerator's), so the comment section stays hidden.
+function pickTopComment(children) {
+  const candidates = (children || []).filter(
+    (c) => c.kind === "t1" && c.data?.body && !isBotComment(c.data)
+  );
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  return candidates.reduce((best, c) =>
+    (c.data.ups || 0) > (best.data.ups || 0) ? c : best
+  ).data;
+}
+
 // Fetches the post's text body, top comment, and image URLs — the one
 // network request the whole preview needs, run automatically on hover.
 async function loadFullContent(postUrl) {
@@ -313,9 +336,7 @@ async function loadFullContent(postUrl) {
       throw new Error("Post data missing in response");
     }
 
-    const topCommentData = payload?.[1]?.data?.children?.find(
-      (c) => c.kind === "t1" && c.data?.body
-    )?.data;
+    const topCommentData = pickTopComment(payload?.[1]?.data?.children);
 
     const fullData = {
       postUrl,
@@ -537,10 +558,10 @@ function normalizePostUrl(rawUrl) {
   }
 }
 
-// limit=1&depth=1 asks Reddit for just the single top-level top comment
-// instead of its default (much larger) comment tree, since that's all we
-// ever read from the response — cuts payload size and parse time
-// noticeably on posts with hundreds of comments.
+// sort=top&limit=10&depth=1 asks Reddit for just the top-level comments,
+// sorted by score, instead of its default (much larger) comment tree —
+// enough to pick the highest-upvoted non-bot comment while still cutting
+// payload size and parse time noticeably on posts with hundreds of comments.
 function buildJsonUrl(normalizedUrl) {
-  return `${normalizedUrl}.json?raw_json=1&limit=1&depth=1`;
+  return `${normalizedUrl}.json?raw_json=1&sort=top&limit=10&depth=1`;
 }
