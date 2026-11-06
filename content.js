@@ -288,12 +288,20 @@ function renderQuickPopup(postUrl, quickData) {
   popup.scrollTop = 0;
 }
 
+// Reddit's standard disclaimer that bots are required/expected to post
+// on automated comments — catches subreddit-specific bots whose username
+// doesn't follow the "*bot" convention (e.g. a custom welcome-message bot).
+const BOT_DISCLAIMER_RE = /i am a bot,? and this action was performed automatically/i;
+
 // Bot accounts (AutoModerator and friends) almost always post the first
 // top-level comment, which isn't what people want to see as the "top"
 // one — filter those out before picking the most-upvoted comment.
 function isBotComment(comment) {
   const author = (comment?.author || "").toLowerCase();
-  return author === "automoderator" || author.endsWith("bot");
+  if (author === "automoderator" || author.endsWith("bot")) {
+    return true;
+  }
+  return BOT_DISCLAIMER_RE.test(comment?.body || "");
 }
 
 // Picks the highest-upvoted top-level comment, ignoring bot comments.
