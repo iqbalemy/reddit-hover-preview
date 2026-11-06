@@ -6,6 +6,12 @@ const HOVER_DELAY_MS = 450;
 // duration (see #reddit-hover-popup.hidden in style.css) — that's a
 // separate, purely visual timing with no such constraint.
 const HIDE_DELAY_MS = 350;
+// Starts the network fetch this far into a hover — well before
+// HOVER_DELAY_MS, when the popup itself appears — so the data is often
+// already back by the time the popup opens instead of showing "Loading
+// post…" for the full round-trip. Still long enough to skip posts the
+// cursor merely passes over. See ensurePrefetched().
+const PREFETCH_DELAY_MS = 150;
 // Forgives a cursor that overshoots the popup's edge by this many CSS
 // pixels (e.g. aiming for its scrollbar, or the gap between the nav
 // arrows and the border) — see isPointerNearPopup().
@@ -16,8 +22,12 @@ const fullContentCache = new Map();
 
 let enabled = true;
 let hoverTimer = null;
+let prefetchTimer = null;
 let hideTimer = null;
 let activePostUrl = "";
+// The postUrl of the single JSON request currently in flight (at most
+// one at a time — see loadFullContent()), or "" when none is.
+let fetchUrl = "";
 let cursorOverPopup = false;
 // Last known pointer position (viewport coordinates), kept up to date by
 // a document-wide mousemove listener — see isPointerNearPopup().
@@ -75,14 +85,21 @@ function onMouseOver(event) {
     return;
   }
 
+  const normalizedUrl = normalizePostUrl(context.url);
+
   // Already on this post's own page (e.g. its comments were opened in this
   // tab) — showing the preview here would just cover the real thing.
-  if (normalizePostUrl(context.url) === normalizePostUrl(window.location.href)) {
+  if (normalizedUrl === normalizePostUrl(window.location.href)) {
     return;
   }
 
   clearTimeout(hideTimer);
   clearTimeout(hoverTimer);
+  clearTimeout(prefetchTimer);
+
+  prefetchTimer = setTimeout(() => {
+    ensurePrefetched(normalizedUrl);
+  }, PREFETCH_DELAY_MS);
 
   hoverTimer = setTimeout(() => {
     showQuickPreview(context);
@@ -162,6 +179,7 @@ function extractQuickDataOldReddit(el) {
 
 function onMouseOut(event) {
   clearTimeout(hoverTimer);
+  clearTimeout(prefetchTimer);
 
   const related = event.relatedTarget;
   const popup = getPopupElement();
@@ -263,6 +281,7 @@ function hidePopup(forceHide) {
   if (forceHide) {
     clearTimeout(hideTimer);
     clearTimeout(hoverTimer);
+    clearTimeout(prefetchTimer);
     popup.classList.add("hidden");
     activePostUrl = "";
     return;
@@ -371,12 +390,38 @@ function pickTopComment(children) {
   ).data;
 }
 
-// Fetches the post's text body, top comment, and image URLs — the one
-// network request the whole preview needs, run automatically on hover.
-async function loadFullContent(postUrl) {
-  if (!postUrl) {
+// Starts the network fetch for `postUrl` ahead of the popup actually
+// showing (PREFETCH_DELAY_MS, well under HOVER_DELAY_MS) so the data is
+// often already back by the time it would open. No-ops if the post is
+// already cached or already being fetched — loadFullContent() itself
+// also guards against the latter, so this is really just the cache
+// check for the prefetch-timer call site.
+function ensurePrefetched(postUrl) {
+  if (!postUrl || fullContentCache.has(postUrl)) {
     return;
   }
+  void loadFullContent(postUrl);
+}
+
+// Fetches the post's text body, top comment, and image URLs — the one
+// network request the whole preview needs. May run twice for the same
+// post (once from the prefetch timer, once from showQuickPreview if the
+// prefetch hasn't resolved yet) — the fetchUrl check below makes the
+// second call a no-op rather than a duplicate request; whichever call
+// actually ran the fetch still renders once it resolves, since that
+// check happens against the popup's *current* state, not the caller's.
+async function loadFullContent(postUrl) {
+  if (!postUrl || fetchUrl === postUrl) {
+    return;
+  }
+
+  // At most one JSON request stays in flight — hovering onward to a
+  // different post before this one resolves cancels it in background.js
+  // instead of letting a response nobody needs anymore finish downloading.
+  if (fetchUrl) {
+    chrome.runtime.sendMessage({ type: "CANCEL_PREVIEW_JSON", requestId: fetchUrl }).catch(() => {});
+  }
+  fetchUrl = postUrl;
 
   const popup = getPopupElement();
 
@@ -384,8 +429,19 @@ async function loadFullContent(postUrl) {
     const jsonUrl = buildJsonUrl(postUrl);
     const result = await chrome.runtime.sendMessage({
       type: "FETCH_PREVIEW_JSON",
-      url: jsonUrl
+      url: jsonUrl,
+      requestId: postUrl
     });
+
+    if (fetchUrl === postUrl) {
+      fetchUrl = "";
+    }
+
+    if (result?.aborted) {
+      // Superseded by a newer hover before Reddit responded — nothing to
+      // show or log, the post that mattered has already moved on.
+      return;
+    }
     if (!result?.ok) {
       throw new Error(result?.error || "Request failed");
     }
@@ -435,6 +491,9 @@ async function loadFullContent(postUrl) {
       renderFullContent(fullData);
     }
   } catch (error) {
+    if (fetchUrl === postUrl) {
+      fetchUrl = "";
+    }
     if (popup?.dataset.postUrl === postUrl) {
       popup.querySelector(".rh-loading").classList.add("hidden");
       const bodyEl = popup.querySelector(".rh-body");
