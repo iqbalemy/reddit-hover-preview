@@ -5,6 +5,10 @@ const HOVER_DELAY_MS = 450;
 // what makes the popup fade out over this same span instead of vanishing
 // instantly.
 const HIDE_DELAY_MS = 350;
+// Forgives a cursor that overshoots the popup's edge by this many CSS
+// pixels (e.g. aiming for its scrollbar, or the gap between the nav
+// arrows and the border) — see isPointerNearPopup().
+const HOVER_BUFFER_PX = 32;
 // Post text/comment/image-URL data, fetched once per post on hover and
 // cached here so re-hovering doesn't re-fetch.
 const fullContentCache = new Map();
@@ -14,6 +18,10 @@ let hoverTimer = null;
 let hideTimer = null;
 let activePostUrl = "";
 let cursorOverPopup = false;
+// Last known pointer position (viewport coordinates), kept up to date by
+// a document-wide mousemove listener — see isPointerNearPopup().
+let lastMouseX = -1;
+let lastMouseY = -1;
 // Slide 0 is always the text/top-comment view; slides 1..N are images.
 // Reset to 0 every time a post is (re-)hovered, per spec: the preview
 // always opens on text first.
@@ -41,6 +49,14 @@ function init() {
 
   document.addEventListener("mouseover", onMouseOver, true);
   document.addEventListener("mouseout", onMouseOut, true);
+  document.addEventListener(
+    "mousemove",
+    (event) => {
+      lastMouseX = event.clientX;
+      lastMouseY = event.clientY;
+    },
+    { passive: true }
+  );
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       hidePopup(true);
@@ -224,6 +240,19 @@ function getPopupElement() {
   return document.getElementById("reddit-hover-popup");
 }
 
+// True if the last known pointer position is inside the popup's bounds
+// expanded by HOVER_BUFFER_PX on every side — i.e. the cursor overshot
+// the popup by a little without really leaving its vicinity.
+function isPointerNearPopup(popup) {
+  const rect = popup.getBoundingClientRect();
+  return (
+    lastMouseX >= rect.left - HOVER_BUFFER_PX &&
+    lastMouseX <= rect.right + HOVER_BUFFER_PX &&
+    lastMouseY >= rect.top - HOVER_BUFFER_PX &&
+    lastMouseY <= rect.bottom + HOVER_BUFFER_PX
+  );
+}
+
 function hidePopup(forceHide) {
   const popup = getPopupElement();
   if (!popup) {
@@ -233,6 +262,18 @@ function hidePopup(forceHide) {
   if (forceHide) {
     clearTimeout(hideTimer);
     clearTimeout(hoverTimer);
+    popup.classList.add("hidden");
+    activePostUrl = "";
+    return;
+  }
+
+  // Give a cursor that's just outside the popup, but still within the
+  // buffer zone around it, another grace period instead of hiding —
+  // handles overshooting the edge (e.g. toward the scrollbar) without
+  // needing an actual oversized hitbox element.
+  if (!popup.classList.contains("hidden") && isPointerNearPopup(popup)) {
+    hideTimer = setTimeout(() => hidePopup(false), HIDE_DELAY_MS);
+    return;
   }
 
   popup.classList.add("hidden");
