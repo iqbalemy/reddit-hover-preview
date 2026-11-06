@@ -116,15 +116,25 @@ function onMouseOver(event) {
 // retargeting), so we fall back to its "permalink"/"content-href" attribute
 // to cover that layout too, and scrape the rest straight off the element.
 //
+// <shreddit-post> is checked FIRST, before the old-Reddit anchor check,
+// even though that means an extra closest() call on every hover: new
+// Reddit's cards have several real <a href="/comments/...">s scattered
+// around (the full-card overlay link, the title link, the comments-count
+// button) that sit *outside* the shreddit-post's shadow root as slotted
+// light-DOM content, so target.closest("a[...]") can match one of those
+// before ever reaching the shreddit-post branch. That misclassified the
+// post as kind "old" with `el` pointing at a bare, dataless <a> (no
+// ".thing" ancestor exists on new Reddit) for most of a card's hoverable
+// area — breaking the instant quick-preview scrape, and specifically
+// isCardViewPost()'s view-type check, depending on exactly where over the
+// card the cursor happened to land. A <shreddit-post> ancestor existing
+// at all is an unambiguous "this is new Reddit" signal, so resolve that
+// first regardless of which anchor is nearest.
+//
 // Deliberately read-only and synchronous: used only for the instant
 // quick-preview shown before the real fetch (see showQuickPreview/
 // loadFullContent) resolves.
 function resolvePostContext(target) {
-  const link = target.closest?.("a[href*='/comments/']");
-  if (isValidPostLink(link)) {
-    return { url: link.href, kind: "old", el: link.closest?.(".thing") || link };
-  }
-
   const post = target.closest?.("shreddit-post");
   if (post) {
     const permalink =
@@ -136,6 +146,11 @@ function resolvePostContext(target) {
         return null;
       }
     }
+  }
+
+  const link = target.closest?.("a[href*='/comments/']");
+  if (isValidPostLink(link)) {
+    return { url: link.href, kind: "old", el: link.closest?.(".thing") || link };
   }
 
   return null;
