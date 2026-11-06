@@ -97,8 +97,9 @@ function onMouseOver(event) {
   clearTimeout(hoverTimer);
   clearTimeout(prefetchTimer);
 
+  const isCardView = isCardViewPost(context);
   prefetchTimer = setTimeout(() => {
-    ensurePrefetched(normalizedUrl);
+    ensurePrefetched(normalizedUrl, isCardView);
   }, PREFETCH_DELAY_MS);
 
   hoverTimer = setTimeout(() => {
@@ -138,6 +139,18 @@ function resolvePostContext(target) {
   }
 
   return null;
+}
+
+// New Reddit's <shreddit-post> carries view-type="cardView" or
+// view-type="compactView" depending on the feed's current display mode
+// (undocumented, found by inspecting live markup — may need updating if
+// Reddit renames it). Card view already shows the post's media inline in
+// the feed itself, so our own image carousel would be redundant there;
+// compact view's thumbnail is too small to read, which is what the
+// carousel is actually for. Old Reddit has no such attribute and always
+// gets the carousel, same as before.
+function isCardViewPost(context) {
+  return context.kind === "new" && context.el?.getAttribute?.("view-type") === "cardView";
 }
 
 // Best-effort scrape of whatever the new-Reddit feed already rendered for
@@ -327,7 +340,7 @@ function showQuickPreview(context) {
   if (cachedFull) {
     renderFullContent(cachedFull);
   } else {
-    void loadFullContent(normalizedUrl);
+    void loadFullContent(normalizedUrl, isCardViewPost(context));
   }
 }
 
@@ -396,11 +409,11 @@ function pickTopComment(children) {
 // already cached or already being fetched — loadFullContent() itself
 // also guards against the latter, so this is really just the cache
 // check for the prefetch-timer call site.
-function ensurePrefetched(postUrl) {
+function ensurePrefetched(postUrl, isCardView) {
   if (!postUrl || fullContentCache.has(postUrl)) {
     return;
   }
-  void loadFullContent(postUrl);
+  void loadFullContent(postUrl, isCardView);
 }
 
 // Fetches the post's text body, top comment, and image URLs — the one
@@ -410,7 +423,9 @@ function ensurePrefetched(postUrl) {
 // second call a no-op rather than a duplicate request; whichever call
 // actually ran the fetch still renders once it resolves, since that
 // check happens against the popup's *current* state, not the caller's.
-async function loadFullContent(postUrl) {
+// `isCardView` skips extracting (and therefore ever fetching/carouseling)
+// images entirely — see isCardViewPost() for why.
+async function loadFullContent(postUrl, isCardView) {
   if (!postUrl || fetchUrl === postUrl) {
     return;
   }
@@ -467,7 +482,10 @@ async function loadFullContent(postUrl) {
       body:
         postData.selftext?.trim() ||
         (postData.is_self ? "" : "(Link post: no text preview available.)"),
-      images: extractImages(postData),
+      // Card view already shows the post's media inline in the feed, so
+      // there's nothing for our own carousel to add — skip the work and
+      // the image fetch/prefetch entirely rather than just hiding the UI.
+      images: isCardView ? [] : extractImages(postData),
       topCommentAuthor: topCommentData ? `u/${topCommentData.author}` : "",
       topCommentBody: topCommentData?.body?.trim() || "",
       topCommentUps: topCommentData && typeof topCommentData.ups === "number" ? topCommentData.ups : null,
