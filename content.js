@@ -160,6 +160,16 @@ function setupPopupElement() {
 
   const popup = document.createElement("aside");
   popup.id = "reddit-hover-popup";
+  // Promotes the popup into the browser's top layer when shown (see
+  // showPopupElement/hidePopupElement below). Reddit's feed wraps posts in
+  // elements that can end up with a CSS transform/containment context
+  // applied (e.g. for virtualized scrolling) — when that happens, a plain
+  // position:fixed child is positioned relative to that ancestor instead
+  // of the real viewport, so our computed top/left/bottom math (which is
+  // viewport-relative) can land the popup far off-screen. The top layer
+  // is always viewport-relative, regardless of any ancestor's transform,
+  // so this keeps positioning correct no matter what the page does.
+  popup.setAttribute("popover", "manual");
   popup.classList.add("hidden");
   popup.innerHTML = `
     <button type="button" class="rh-nav-prev hidden" aria-label="Previous">&#8249;</button>
@@ -220,6 +230,35 @@ function getPopupElement() {
   return document.getElementById("reddit-hover-popup");
 }
 
+// showPopover()/hidePopover() promote the popup into (or remove it from)
+// the top layer — see the comment on the `popover` attribute above for
+// why that matters. Feature-detected and wrapped in try/catch so a
+// browser without Popover API support (or an already-open/closed state)
+// just falls back to the "hidden" class, which controls visibility
+// either way.
+function showPopupElement(popup) {
+  popup.classList.remove("hidden");
+  try {
+    if (typeof popup.showPopover === "function" && !popup.matches(":popover-open")) {
+      popup.showPopover();
+    }
+  } catch {
+    // Unsupported, or already open — the class toggle above is enough.
+  }
+}
+
+function hidePopupElement(popup) {
+  popup.classList.add("hidden");
+  try {
+    if (typeof popup.hidePopover === "function" && popup.matches(":popover-open")) {
+      popup.hidePopover();
+    }
+  } catch {
+    // Unsupported, or already closed (e.g. the browser's own Escape
+    // handling for the top layer beat us to it) — nothing more to do.
+  }
+}
+
 function hidePopup(forceHide) {
   const popup = getPopupElement();
   if (!popup) {
@@ -231,7 +270,7 @@ function hidePopup(forceHide) {
     clearTimeout(hoverTimer);
   }
 
-  popup.classList.add("hidden");
+  hidePopupElement(popup);
   activePostUrl = "";
 }
 
@@ -359,7 +398,7 @@ function renderQuickPopup(postUrl, quickData) {
   popup.querySelector(".rh-slide-dots").classList.add("hidden");
   popup.querySelector(".rh-loading").classList.remove("hidden");
 
-  popup.classList.remove("hidden");
+  showPopupElement(popup);
   popup.scrollTop = 0;
 }
 
