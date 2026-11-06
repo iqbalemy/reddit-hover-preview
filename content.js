@@ -4,7 +4,7 @@ const HOVER_DELAY_MS = 450;
 // #reddit-hover-popup / #reddit-hover-popup.hidden in style.css — that's
 // what makes the popup fade out over this same span instead of vanishing
 // instantly.
-const HIDE_DELAY_MS = 350;
+const HIDE_DELAY_MS = 500;
 // Forgives a cursor that overshoots the popup's edge by this many CSS
 // pixels (e.g. aiming for its scrollbar, or the gap between the nav
 // arrows and the border) — see isPointerNearPopup().

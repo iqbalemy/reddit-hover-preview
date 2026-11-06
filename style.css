@@ -58,7 +58,7 @@
      the bare `pre` styling. */
   opacity: 1 !important;
   visibility: visible;
-  transition: opacity 350ms ease, visibility 0s linear 0s !important;
+  transition: opacity 500ms ease, visibility 0s linear 0s !important;
 }
 
 /* Scrollbar styling */
@@ -77,7 +77,7 @@
   opacity: 0 !important;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 350ms ease, visibility 0s linear 350ms !important;
+  transition: opacity 500ms ease, visibility 0s linear 500ms !important;
 }
 
 #reddit-hover-popup .hidden {
