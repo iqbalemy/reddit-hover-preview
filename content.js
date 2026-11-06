@@ -6,6 +6,12 @@ const HOVER_DELAY_MS = 450;
 // duration (see #reddit-hover-popup.hidden in style.css) — that's a
 // separate, purely visual timing with no such constraint.
 const HIDE_DELAY_MS = 350;
+// Starts the network fetch this far into a hover — well before
+// HOVER_DELAY_MS, when the popup itself appears — so the data is often
+// already back by the time the popup opens instead of showing "Loading
+// post…" for the full round-trip. Still long enough to skip posts the
+// cursor merely passes over. See ensurePrefetched().
+const PREFETCH_DELAY_MS = 150;
 // Forgives a cursor that overshoots the popup's edge by this many CSS
 // pixels (e.g. aiming for its scrollbar, or the gap between the nav
 // arrows and the border) — see isPointerNearPopup().
@@ -16,6 +22,7 @@ const fullContentCache = new Map();
 
 let enabled = true;
 let hoverTimer = null;
+let prefetchTimer = null;
 let hideTimer = null;
 let activePostUrl = "";
 // The postUrl of the single JSON request currently in flight (at most
@@ -88,6 +95,12 @@ function onMouseOver(event) {
 
   clearTimeout(hideTimer);
   clearTimeout(hoverTimer);
+  clearTimeout(prefetchTimer);
+
+  const isCardView = isCardViewPost(context);
+  prefetchTimer = setTimeout(() => {
+    ensurePrefetched(normalizedUrl, isCardView);
+  }, PREFETCH_DELAY_MS);
 
   hoverTimer = setTimeout(() => {
     showQuickPreview(context);
@@ -194,6 +207,7 @@ function extractQuickDataOldReddit(el) {
 
 function onMouseOut(event) {
   clearTimeout(hoverTimer);
+  clearTimeout(prefetchTimer);
 
   const related = event.relatedTarget;
   const popup = getPopupElement();
@@ -311,6 +325,7 @@ function hidePopup(forceHide) {
   if (forceHide) {
     clearTimeout(hideTimer);
     clearTimeout(hoverTimer);
+    clearTimeout(prefetchTimer);
     popup.classList.add("hidden");
     activePostUrl = "";
     return;
@@ -419,13 +434,28 @@ function pickTopComment(children) {
   ).data;
 }
 
+// Starts the network fetch for `postUrl` ahead of the popup actually
+// showing (PREFETCH_DELAY_MS, well under HOVER_DELAY_MS) so the data is
+// often already back by the time it would open. No-ops if the post is
+// already cached or already being fetched — loadFullContent() itself
+// also guards against the latter, so this is really just the cache
+// check for the prefetch-timer call site.
+function ensurePrefetched(postUrl, isCardView) {
+  if (!postUrl || fullContentCache.has(postUrl)) {
+    return;
+  }
+  void loadFullContent(postUrl, isCardView);
+}
+
 // Fetches the post's text body, top comment, and image URLs — the one
-// network request the whole preview needs, run once the popup is about
-// to show. `isCardView` skips extracting (and therefore ever fetching/
-// carouseling) images entirely — see isCardViewPost() for why. The
-// fetchUrl check below keeps at most one request in flight — if a
-// different post's fetch starts before this one resolves, it's the one
-// that gets cancelled (not this one).
+// network request the whole preview needs. May run twice for the same
+// post (once from the prefetch timer, once from showQuickPreview if the
+// prefetch hasn't resolved yet) — the fetchUrl check below makes the
+// second call a no-op rather than a duplicate request; whichever call
+// actually ran the fetch still renders once it resolves, since that
+// check happens against the popup's *current* state, not the caller's.
+// `isCardView` skips extracting (and therefore ever fetching/carouseling)
+// images entirely — see isCardViewPost() for why.
 async function loadFullContent(postUrl, isCardView) {
   if (!postUrl || fetchUrl === postUrl) {
     return;
