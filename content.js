@@ -17,8 +17,35 @@ const PREFETCH_DELAY_MS = 150;
 // arrows and the border) — see isPointerNearPopup().
 const HOVER_BUFFER_PX = 32;
 // Post text/comment/image-URL data, fetched once per post on hover and
-// cached here so re-hovering doesn't re-fetch.
+// cached here so re-hovering doesn't re-fetch. Mirrored into
+// chrome.storage.session (see persistCache()) so a post already seen
+// earlier in this browsing session is still cached after a page reload
+// or navigation — storage.session survives those, unlike this in-memory
+// Map, and is still cleared when the browser session itself ends.
 const fullContentCache = new Map();
+const CACHE_STORAGE_KEY = "fullContentCacheV1";
+
+function loadPersistedCache() {
+  if (!chrome.storage.session) {
+    return;
+  }
+  chrome.storage.session.get({ [CACHE_STORAGE_KEY]: [] }, (result) => {
+    for (const [postUrl, fullData] of result[CACHE_STORAGE_KEY] || []) {
+      // Never overwrite an entry a fetch already produced while this load
+      // was in flight.
+      if (!fullContentCache.has(postUrl)) {
+        fullContentCache.set(postUrl, fullData);
+      }
+    }
+  });
+}
+
+function persistCache() {
+  if (!chrome.storage.session) {
+    return;
+  }
+  chrome.storage.session.set({ [CACHE_STORAGE_KEY]: Array.from(fullContentCache.entries()) });
+}
 
 let enabled = true;
 let hoverTimer = null;
@@ -37,11 +64,17 @@ let lastMouseY = -1;
 // Reset to 0 every time a post is (re-)hovered, per spec: the preview
 // always opens on text first.
 let slideIndex = 0;
+// Cached references to the popup's own child elements, populated once in
+// setupPopupElement() — the popup is a singleton created once and never
+// rebuilt, so these stay valid for the lifetime of the content script.
+// Avoids a fresh querySelector() on every render/slide-change/hover.
+let els = null;
 
 init();
 
 function init() {
   setupPopupElement();
+  loadPersistedCache();
 
   chrome.storage.sync.get({ [SETTINGS_KEY]: true }, (result) => {
     enabled = Boolean(result[SETTINGS_KEY]);
@@ -141,7 +174,11 @@ function resolvePostContext(target) {
       post.getAttribute("permalink") || post.getAttribute("content-href");
     if (permalink) {
       try {
-        return { url: new URL(permalink, window.location.origin).href, kind: "new", el: post };
+        const url = new URL(permalink, window.location.origin);
+        if (!/(^|\.)reddit\.com$/i.test(url.hostname)) {
+          return null;
+        }
+        return { url: url.href, kind: "new", el: post };
       } catch {
         return null;
       }
@@ -229,8 +266,12 @@ function setupPopupElement() {
   popup.id = "reddit-hover-popup";
   popup.classList.add("hidden");
   popup.innerHTML = `
-    <button type="button" class="rh-nav-prev hidden" aria-label="Previous">&#8249;</button>
-    <button type="button" class="rh-nav-next hidden" aria-label="Next">&#8250;</button>
+    <button type="button" class="rh-nav-prev hidden" aria-label="Previous">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
+    <button type="button" class="rh-nav-next hidden" aria-label="Next">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
     <h4 class="rh-title"></h4>
     <p class="rh-meta"></p>
     <p class="rh-stats"></p>
@@ -256,6 +297,26 @@ function setupPopupElement() {
     <div class="rh-slide-dots hidden"></div>
   `;
 
+  els = {
+    navPrev: popup.querySelector(".rh-nav-prev"),
+    navNext: popup.querySelector(".rh-nav-next"),
+    title: popup.querySelector(".rh-title"),
+    meta: popup.querySelector(".rh-meta"),
+    stats: popup.querySelector(".rh-stats"),
+    loading: popup.querySelector(".rh-loading"),
+    slideText: popup.querySelector(".rh-slide-text"),
+    body: popup.querySelector(".rh-body"),
+    commentSection: popup.querySelector(".rh-comment-section"),
+    commentAuthor: popup.querySelector(".rh-comment-author"),
+    commentUps: popup.querySelector(".rh-comment-ups"),
+    commentBody: popup.querySelector(".rh-comment-body"),
+    slideImage: popup.querySelector(".rh-slide-image"),
+    slideGate: popup.querySelector(".rh-slide-gate"),
+    gateRemark: popup.querySelector(".rh-gate-remark"),
+    gateButton: popup.querySelector(".rh-gate-button"),
+    slideDots: popup.querySelector(".rh-slide-dots")
+  };
+
   popup.addEventListener("mouseenter", () => {
     clearTimeout(hideTimer);
     cursorOverPopup = true;
@@ -277,17 +338,17 @@ function setupPopupElement() {
     }, HIDE_DELAY_MS);
   });
 
-  popup.querySelector(".rh-nav-prev").addEventListener("click", () => {
+  els.navPrev.addEventListener("click", () => {
     navigateSlide(popup, -1);
   });
-  popup.querySelector(".rh-nav-next").addEventListener("click", () => {
+  els.navNext.addEventListener("click", () => {
     navigateSlide(popup, 1);
   });
 
   // "Show content" is a one-way reveal per post — sticks on fullData
   // itself (not some popup-local flag) so it stays revealed if the user
   // navigates the carousel away and back, or re-hovers the same post.
-  popup.querySelector(".rh-gate-button").addEventListener("click", () => {
+  els.gateButton.addEventListener("click", () => {
     const fullData = fullContentCache.get(popup.dataset.postUrl);
     if (!fullData) {
       return;
@@ -383,21 +444,21 @@ function renderQuickPopup(postUrl, quickData) {
 
   popup.dataset.postUrl = postUrl;
 
-  popup.querySelector(".rh-title").textContent = quickData.title;
-  popup.querySelector(".rh-meta").textContent = quickData.meta;
-  popup.querySelector(".rh-stats").textContent = [
+  els.title.textContent = quickData.title;
+  els.meta.textContent = quickData.meta;
+  els.stats.textContent = [
     quickData.score ? `${quickData.score} upvotes` : "",
     quickData.commentCount ? `${quickData.commentCount} comments` : ""
   ].filter(Boolean).join(" · ");
 
-  popup.querySelector(".rh-body").classList.add("hidden");
-  popup.querySelector(".rh-comment-section").classList.add("hidden");
-  popup.querySelector(".rh-slide-image").classList.add("hidden");
-  popup.querySelector(".rh-slide-text").classList.remove("hidden");
-  popup.querySelector(".rh-nav-prev").classList.add("hidden");
-  popup.querySelector(".rh-nav-next").classList.add("hidden");
-  popup.querySelector(".rh-slide-dots").classList.add("hidden");
-  popup.querySelector(".rh-loading").classList.remove("hidden");
+  els.body.classList.add("hidden");
+  els.commentSection.classList.add("hidden");
+  els.slideImage.classList.add("hidden");
+  els.slideText.classList.remove("hidden");
+  els.navPrev.classList.add("hidden");
+  els.navNext.classList.add("hidden");
+  els.slideDots.classList.add("hidden");
+  els.loading.classList.remove("hidden");
 
   popup.classList.remove("hidden");
   popup.scrollTop = 0;
@@ -532,6 +593,7 @@ async function loadFullContent(postUrl, isCardView) {
       fullContentCache.delete(oldestKey);
     }
     fullContentCache.set(postUrl, fullData);
+    persistCache();
 
     // The user may have already moved into the popup while this fetch was
     // in flight — in that case start the image prefetch immediately
@@ -548,10 +610,9 @@ async function loadFullContent(postUrl, isCardView) {
       fetchUrl = "";
     }
     if (popup?.dataset.postUrl === postUrl) {
-      popup.querySelector(".rh-loading").classList.add("hidden");
-      const bodyEl = popup.querySelector(".rh-body");
-      bodyEl.textContent = "Could not load this post right now.";
-      bodyEl.classList.remove("hidden");
+      els.loading.classList.add("hidden");
+      els.body.textContent = "Could not load this post right now.";
+      els.body.classList.remove("hidden");
     }
     console.error("[Reddit Hover Preview]", error);
   }
@@ -650,23 +711,23 @@ function renderFullContent(fullData) {
     return;
   }
 
-  popup.querySelector(".rh-loading").classList.add("hidden");
+  els.loading.classList.add("hidden");
 
   // Correct the quick DOM-scraped placeholder with the real data, in case
   // that scrape came up empty (e.g. "Untitled post" / "r/unknown").
   if (fullData.title) {
-    popup.querySelector(".rh-title").textContent = fullData.title;
+    els.title.textContent = fullData.title;
   }
-  popup.querySelector(".rh-meta").textContent = fullData.meta;
-  popup.querySelector(".rh-stats").textContent = [
+  els.meta.textContent = fullData.meta;
+  els.stats.textContent = [
     fullData.score ? `${fullData.score} upvotes` : "",
     fullData.commentCount ? `${fullData.commentCount} comments` : ""
   ].filter(Boolean).join(" · ");
 
   const hasImages = fullData.images.length > 0;
-  popup.querySelector(".rh-nav-prev").classList.toggle("hidden", !hasImages);
-  popup.querySelector(".rh-nav-next").classList.toggle("hidden", !hasImages);
-  popup.querySelector(".rh-slide-dots").classList.toggle("hidden", !hasImages);
+  els.navPrev.classList.toggle("hidden", !hasImages);
+  els.navNext.classList.toggle("hidden", !hasImages);
+  els.slideDots.classList.toggle("hidden", !hasImages);
 
   showSlide(popup, fullData, slideIndex);
 }
@@ -689,9 +750,7 @@ function showSlide(popup, fullData, requestedIndex) {
   const totalSlides = fullData.images.length + 1;
   slideIndex = ((requestedIndex % totalSlides) + totalSlides) % totalSlides;
 
-  const textEl = popup.querySelector(".rh-slide-text");
-  const imageEl = popup.querySelector(".rh-slide-image");
-  const gateEl = popup.querySelector(".rh-slide-gate");
+  const { slideText: textEl, slideImage: imageEl, slideGate: gateEl } = els;
 
   if (slideIndex === 0) {
     imageEl.classList.add("hidden");
@@ -700,23 +759,21 @@ function showSlide(popup, fullData, requestedIndex) {
     gateEl.classList.add("hidden");
     textEl.classList.remove("hidden");
 
-    const bodyEl = popup.querySelector(".rh-body");
     if (fullData.body) {
-      bodyEl.textContent = fullData.body;
-      bodyEl.classList.remove("hidden");
+      els.body.textContent = fullData.body;
+      els.body.classList.remove("hidden");
     } else {
-      bodyEl.classList.add("hidden");
+      els.body.classList.add("hidden");
     }
 
-    const commentSection = popup.querySelector(".rh-comment-section");
     if (fullData.topCommentBody) {
-      popup.querySelector(".rh-comment-author").textContent = fullData.topCommentAuthor;
-      popup.querySelector(".rh-comment-ups").textContent =
+      els.commentAuthor.textContent = fullData.topCommentAuthor;
+      els.commentUps.textContent =
         fullData.topCommentUps != null ? `${fullData.topCommentUps} upvotes` : "";
-      popup.querySelector(".rh-comment-body").textContent = fullData.topCommentBody;
-      commentSection.classList.remove("hidden");
+      els.commentBody.textContent = fullData.topCommentBody;
+      els.commentSection.classList.remove("hidden");
     } else {
-      commentSection.classList.add("hidden");
+      els.commentSection.classList.add("hidden");
     }
   } else {
     textEl.classList.add("hidden");
@@ -726,19 +783,18 @@ function showSlide(popup, fullData, requestedIndex) {
     const isGated = Boolean(fullData.gateRemark) && !fullData.revealed;
     imageEl.classList.toggle("gated", isGated);
     if (isGated) {
-      popup.querySelector(".rh-gate-remark").textContent = fullData.gateRemark;
+      els.gateRemark.textContent = fullData.gateRemark;
       gateEl.classList.remove("hidden");
     } else {
       gateEl.classList.add("hidden");
     }
   }
 
-  updateDots(popup, totalSlides);
+  updateDots(totalSlides);
 }
 
-function updateDots(popup, totalSlides) {
-  const dotsEl = popup.querySelector(".rh-slide-dots");
-  dotsEl.innerHTML = Array.from(
+function updateDots(totalSlides) {
+  els.slideDots.innerHTML = Array.from(
     { length: totalSlides },
     (_, i) => `<span class="rh-dot${i === slideIndex ? " active" : ""}"></span>`
   ).join("");

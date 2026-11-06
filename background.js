@@ -23,6 +23,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
 
+  // Defense in depth: content.js already restricts which URLs it asks us
+  // to fetch, but don't rely on that alone — this is the one place the
+  // user's reddit.com session cookie actually gets attached, so verify
+  // the host here too before ever sending it anywhere.
+  let targetHost;
+  try {
+    targetHost = new URL(message.url).hostname;
+  } catch {
+    sendResponse({ ok: false, error: "Invalid URL" });
+    return false;
+  }
+  if (!/(^|\.)reddit\.com$/i.test(targetHost)) {
+    sendResponse({ ok: false, error: "Refusing to fetch a non-reddit.com URL" });
+    return false;
+  }
+
   const controller = new AbortController();
   if (message.requestId) {
     inFlightControllers.set(message.requestId, controller);
