@@ -54,6 +54,12 @@ function onMouseOver(event) {
     return;
   }
 
+  // Already on this post's own page (e.g. its comments were opened in this
+  // tab) — showing the preview here would just cover the real thing.
+  if (normalizePostUrl(context.url) === normalizePostUrl(window.location.href)) {
+    return;
+  }
+
   clearTimeout(hideTimer);
   clearTimeout(hoverTimer);
 
